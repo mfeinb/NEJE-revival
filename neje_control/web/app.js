@@ -10,23 +10,16 @@ const ui = {
   invert: $('#invert'), imageInfo: $('#imageInfo'), preview: $('#previewCanvas'),
   rotateLeft: $('#rotateLeft'), rotateRight: $('#rotateRight'),
   flipHorizontal: $('#flipHorizontal'), flipVertical: $('#flipVertical'),
-  transformState: $('#transformState'), resetCrop: $('#resetCrop'),
-  cropLeft: $('#cropLeft'), cropRight: $('#cropRight'), cropTop: $('#cropTop'), cropBottom: $('#cropBottom'),
-  lockAspect: $('#lockAspect'), artworkHeight: $('#artworkHeight'),
-  artworkHeightNumber: $('#artworkHeightNumber'), artworkHeightValue: $('#artworkHeightValue'),
+  transformState: $('#transformState'), resetCrop: $('#resetCrop'), lockAspect: $('#lockAspect'),
+  moveTool: $('#moveTool'), cropTool: $('#cropTool'), applyCrop: $('#applyCrop'),
+  cancelCrop: $('#cancelCrop'), cropActions: $('#cropActions'), editorHelp: $('#editorHelp'),
   advancedEnabled: $('#advancedEnabled'), advancedControls: $('#advancedControls'),
   brightness: $('#brightness'), brightnessValue: $('#brightnessValue'),
   contrast: $('#contrast'), contrastValue: $('#contrastValue'),
   gamma: $('#gamma'), gammaValue: $('#gammaValue'), sharpen: $('#sharpen'), sharpenValue: $('#sharpenValue'),
   ditherAlgorithm: $('#ditherAlgorithm'), resetAdvanced: $('#resetAdvanced'),
   emptyPreview: $('#emptyPreview'), dimensions: $('#dimensions'), burnTime: $('#burnTime'),
-  pointMode: $('#pointMode'), pointHelp: $('#pointHelp'),
-  artworkWidth: $('#artworkWidth'), artworkWidthNumber: $('#artworkWidthNumber'),
-  artworkWidthValue: $('#artworkWidthValue'),
-  placementControls: $('#placementControls'), positionX: $('#positionX'),
-  positionXNumber: $('#positionXNumber'), positionY: $('#positionY'),
-  positionYNumber: $('#positionYNumber'), positionXValue: $('#positionXValue'),
-  positionYValue: $('#positionYValue'), placementHelp: $('#placementHelp'),
+  pointMode: $('#pointMode'),
   controlHeading: $('#controlHeading'),
   controlHint: $('#controlHint'),
   materialPreset: $('#materialPreset'), presetHelp: $('#presetHelp'),
@@ -57,14 +50,13 @@ let packedBitmap = null;
 let preparedImageData = null;
 let latestStatus = { connected: false };
 let rebuilding = 0;
-let placementKey = '';
 let sizeKey = '';
 let imageRevision = 0;
 let actionPending = false;
 let preparePending = false;
 let preparedKey = '';
 let connectPending = false;
-let pointModeEnabled = false;
+let editorMode = 'move';
 let laserPoint = null;
 let outlineActive = false;
 let outlineStateKnown = false;
@@ -72,6 +64,14 @@ let errorVisibleUntil = 0;
 let rotation = 0;
 let flipX = false;
 let flipY = false;
+let cropEdges = { left: 0, right: 0, top: 0, bottom: 0 };
+let cropDraft = null;
+let cropEditor = null;
+let pointerDrag = null;
+let artworkWidth = null;
+let artworkHeight = null;
+let artworkLeft = null;
+let artworkTop = null;
 let applyingPreset = false;
 const ERROR_DISPLAY_MS = 20000;
 
@@ -121,26 +121,11 @@ async function refreshPorts() {
   } catch (error) { showError(error); }
 }
 
-function updatePlacementHelp() {
-  const profile = protocolProfiles[ui.protocol.value];
-  const classicProtocol = ui.protocol.value.startsWith('classic-');
-  let help = profile.placement
-    ? 'Changes the artwork origin sent to the controller. The arrow pad also adjusts this position.'
-    : 'Changes where pixels are stored in the mode-4 engraving buffer. It does not jog the machine; use the separate arrow pad for that.';
-  if (sourceImage && !classicProtocol && Number(ui.positionX.max) === 0) {
-    help += ' Reduce Artwork width to enable horizontal movement.';
-  }
-  ui.placementHelp.textContent = help;
-}
-
 function updateProtocolUI() {
   const profile = protocolProfiles[ui.protocol.value];
   const classic = !profile.placement;
-  const classicProtocol = ui.protocol.value.startsWith('classic-');
   ui.protocolHelp.textContent = protocolDescriptions[ui.protocol.value];
   ui.powerControls.hidden = !profile.power;
-  ui.placementControls.hidden = classicProtocol;
-  updatePlacementHelp();
   ui.controlHeading.textContent = profile.placement ? 'Artwork positioning' : 'Machine controls';
   ui.controlHint.textContent = ui.protocol.value === 'dk8-official'
     ? (profile.placement ? 'Moves the low-power positioning point in 4-pixel steps' : 'Direct four-byte jog commands from NEJE v4.0')
@@ -202,16 +187,9 @@ function updateTransformState() {
   ui.transformState.textContent = parts.length ? parts.join(' · ') : 'No rotation or flip';
 }
 
-function cropValue(control) {
-  const value = Math.round(Number(control.value));
-  control.value = String(Math.max(0, Math.min(45, Number.isFinite(value) ? value : 0)));
-  return Number(control.value);
-}
-
-function transformedSourceCanvas() {
+function transformedSourceCanvas(edges = cropEdges) {
   const geometry = NEJEImage.transformGeometry(sourceImage.naturalWidth, sourceImage.naturalHeight, {
-    left: cropValue(ui.cropLeft), right: cropValue(ui.cropRight),
-    top: cropValue(ui.cropTop), bottom: cropValue(ui.cropBottom),
+    left: edges.left, right: edges.right, top: edges.top, bottom: edges.bottom,
   }, rotation);
   const { sx, sy, cropWidth, cropHeight } = geometry;
   const cropped = document.createElement('canvas');
@@ -254,24 +232,6 @@ function markMaterialCustom() {
   setMaterialPreset('custom');
 }
 
-function syncNumberInput(range, number) {
-  number.min = range.min;
-  number.max = range.max;
-  number.value = range.value;
-  number.disabled = range.disabled;
-}
-
-function applyNumberInput(range, number, callback) {
-  const value = Number(number.value);
-  if (!Number.isFinite(value)) {
-    number.value = range.value;
-    return;
-  }
-  range.value = String(Math.max(Number(range.min), Math.min(Number(range.max), Math.round(value))));
-  number.value = range.value;
-  callback();
-}
-
 function fitDimensions(width, height, maxWidth, maxHeight) {
   const scale = Math.min(maxWidth / width, maxHeight / height);
   return [Math.max(1, Math.round(width * scale)), Math.max(1, Math.round(height * scale))];
@@ -286,52 +246,59 @@ function bytesToBase64(bytes) {
   return btoa(binary);
 }
 
+function resetArtworkGeometry() {
+  sizeKey = '';
+  artworkWidth = null;
+  artworkHeight = null;
+  artworkLeft = null;
+  artworkTop = null;
+}
+
+function clampArtwork(maximum) {
+  artworkWidth = Math.max(1, Math.min(maximum, Math.round(artworkWidth || 1)));
+  artworkHeight = Math.max(1, Math.min(maximum, Math.round(artworkHeight || 1)));
+  artworkLeft = Math.max(0, Math.min(maximum - artworkWidth, Math.round(artworkLeft || 0)));
+  artworkTop = Math.max(0, Math.min(maximum - artworkHeight, Math.round(artworkTop || 0)));
+}
+
 function rebuildPreview() {
   if (!sourceImage) return;
+  if (editorMode === 'crop') {
+    renderCropEditor();
+    return;
+  }
   // Invalidate data from the previous protocol or image immediately. Without
-  // this, a fast Outline click can send a stale 512px Classic bitmap while the
-  // older preview is still rebuilding on the next animation frame.
+  // this, a fast Outline click can send a stale bitmap while preview work is queued.
   packedBitmap = null;
   preparedImageData = null;
   updateButtons();
   const token = ++rebuilding;
   requestAnimationFrame(() => {
-    if (token !== rebuilding) return;
+    if (token !== rebuilding || editorMode === 'crop') return;
     const profile = protocolProfiles[ui.protocol.value];
     const classic = ui.protocol.value.startsWith('classic-');
-    const max = profile.max_width;
+    const maximum = profile.max_width;
     const transformed = transformedSourceCanvas();
-    const [fittedWidth, fittedHeight] = fitDimensions(transformed.width, transformed.height, max, max);
-    const nextSizeKey = `${ui.protocol.value}:${max}:${imageRevision}`;
-    const locked = ui.lockAspect.checked;
-    ui.artworkWidth.max = String(locked ? fittedWidth : max);
-    ui.artworkHeight.max = String(locked ? fittedHeight : max);
-    ui.artworkWidth.disabled = false;
-    ui.artworkHeight.disabled = locked;
-    if (sizeKey !== nextSizeKey) {
-      ui.artworkWidth.value = String(fittedWidth);
-      ui.artworkHeight.value = String(fittedHeight);
+    const [fittedWidth, fittedHeight] = fitDimensions(transformed.width, transformed.height, maximum, maximum);
+    const nextSizeKey = `${ui.protocol.value}:${maximum}:${imageRevision}`;
+    if (sizeKey !== nextSizeKey || artworkWidth === null || artworkHeight === null) {
+      artworkWidth = fittedWidth;
+      artworkHeight = fittedHeight;
+      artworkLeft = Math.floor((maximum - artworkWidth) / 2);
+      artworkTop = Math.floor((maximum - artworkHeight) / 2);
       sizeKey = nextSizeKey;
     }
-    const contentWidth = Math.max(1, Math.min(Number(ui.artworkWidth.max), Number(ui.artworkWidth.value)));
-    const contentHeight = locked
-      ? Math.max(1, Math.round(transformed.height * contentWidth / transformed.width))
-      : Math.max(1, Math.min(max, Number(ui.artworkHeight.value)));
-    ui.artworkWidth.value = String(contentWidth);
-    ui.artworkHeight.value = String(contentHeight);
-    syncNumberInput(ui.artworkWidth, ui.artworkWidthNumber);
-    syncNumberInput(ui.artworkHeight, ui.artworkHeightNumber);
-    ui.artworkWidthValue.textContent = `${contentWidth} px · ${(contentWidth * 38 / max).toFixed(1)} mm`;
-    ui.artworkHeightValue.textContent = `${contentHeight} px · ${(contentHeight * 38 / max).toFixed(1)} mm`;
-    const width = classic ? 512 : contentWidth;
-    const height = classic ? 512 : contentHeight;
+    clampArtwork(maximum);
+
+    const width = classic ? maximum : artworkWidth;
+    const height = classic ? maximum : artworkHeight;
     const work = document.createElement('canvas');
     work.width = width; work.height = height;
     const ctx = work.getContext('2d', { willReadFrequently: true });
     ctx.fillStyle = 'white'; ctx.fillRect(0, 0, width, height);
-    const x = classic ? Math.floor((width - contentWidth) / 2) : 0;
-    const y = classic ? Math.floor((height - contentHeight) / 2) : 0;
-    ctx.drawImage(transformed, x, y, contentWidth, contentHeight);
+    const drawX = classic ? artworkLeft : 0;
+    const drawY = classic ? artworkTop : 0;
+    ctx.drawImage(transformed, drawX, drawY, artworkWidth, artworkHeight);
     const image = ctx.getImageData(0, 0, width, height);
     const rowBytes = Math.ceil(width / 8);
     const packed = new Uint8Array(rowBytes * height);
@@ -352,56 +319,57 @@ function rebuildPreview() {
         packed[row * rowBytes + (column >> 3)] |= 0x80 >> (column % 8);
       }
     }
-    // Unused low bits in the final byte of each row must stay off. Keeping
-    // this explicit protects device uploads if the packing loop changes later.
     if (width % 8) {
       const usedBitsMask = (0xff << (8 - width % 8)) & 0xff;
-      for (let row = 0; row < height; row++) {
-        packed[(row + 1) * rowBytes - 1] &= usedBitsMask;
-      }
+      for (let row = 0; row < height; row++) packed[(row + 1) * rowBytes - 1] &= usedBitsMask;
     }
     const ditherName = ui.advancedEnabled.checked
       ? ui.ditherAlgorithm.options[ui.ditherAlgorithm.selectedIndex].text.split(' · ')[0]
       : 'Floyd–Steinberg';
     const conversion = ui.renderMode.value === 'dither' ? `${ditherName} dither` : 'Threshold';
-    const sizing = locked ? 'Aspect ratio locked.' : 'Custom width and height applied.';
-    ui.imageInfo.textContent = classic
-      ? `${conversion} applied. ${sizing} Centered in the classic firmware's required 512 × 512 frame.`
-      : (profile.placement
-        ? `${conversion} applied. ${sizing} X/Y place it inside the ${max} × ${max} work area.`
-        : `${conversion} applied. ${sizing} Positioned inside the ${max} × ${max} work area.`);
-    packedBitmap = { width, height, pixels: bytesToBase64(packed) };
+    ui.imageInfo.textContent = `${conversion} applied. Move and resize the artwork directly in the preview.`;
+    packedBitmap = {
+      width,
+      height,
+      pixels: bytesToBase64(packed),
+      left: classic ? 0 : artworkLeft,
+      top: classic ? 0 : artworkTop,
+    };
     preparedImageData = image;
-    if (!classic) {
-      const key = `${ui.protocol.value}:${imageRevision}:${width}x${height}`;
-      ui.positionX.max = String(max - width);
-      ui.positionY.max = String(max - height);
-      if (placementKey !== key) {
-        ui.positionX.value = String(Math.floor((max - width) / 2));
-        ui.positionY.value = String(Math.floor((max - height) / 2));
-        placementKey = key;
-      }
-      syncNumberInput(ui.positionX, ui.positionXNumber);
-      syncNumberInput(ui.positionY, ui.positionYNumber);
-      packedBitmap.left = Number(ui.positionX.value);
-      packedBitmap.top = Number(ui.positionY.value);
-    }
     renderPlacement();
     updateButtons();
   });
 }
 
+function drawArtworkHandles(ctx) {
+  if (editorMode !== 'move' || artworkWidth === null) return;
+  const x = artworkLeft + .5;
+  const y = artworkTop + .5;
+  const handle = Math.max(7, Number(capabilities().max_width) / 70);
+  ctx.save();
+  ctx.strokeStyle = '#18a06d';
+  ctx.fillStyle = 'white';
+  ctx.lineWidth = Math.max(2, Number(capabilities().max_width) / 275);
+  ctx.setLineDash([8, 5]);
+  ctx.strokeRect(x, y, Math.max(0, artworkWidth - 1), Math.max(0, artworkHeight - 1));
+  ctx.setLineDash([]);
+  for (const [hx, hy] of [[x, y], [x + artworkWidth, y], [x, y + artworkHeight], [x + artworkWidth, y + artworkHeight]]) {
+    ctx.fillRect(hx - handle / 2, hy - handle / 2, handle, handle);
+    ctx.strokeRect(hx - handle / 2, hy - handle / 2, handle, handle);
+  }
+  ctx.restore();
+}
+
 function renderPlacement() {
-  if (!packedBitmap || !preparedImageData) return;
+  if (!packedBitmap || !preparedImageData || editorMode === 'crop') return;
   const profile = protocolProfiles[ui.protocol.value];
   const classic = ui.protocol.value.startsWith('classic-');
   const canvasSize = profile.max_width;
   ui.preview.width = canvasSize; ui.preview.height = canvasSize;
   const ctx = ui.preview.getContext('2d');
   ctx.fillStyle = 'white'; ctx.fillRect(0, 0, canvasSize, canvasSize);
-  const left = classic ? 0 : Number(ui.positionX.value);
-  const top = classic ? 0 : Number(ui.positionY.value);
-  ctx.putImageData(preparedImageData, left, top);
+  ctx.putImageData(preparedImageData, classic ? 0 : artworkLeft, classic ? 0 : artworkTop);
+  drawArtworkHandles(ctx);
   if (laserPoint) {
     const { x, y } = laserPoint;
     ctx.save();
@@ -415,20 +383,118 @@ function renderPlacement() {
     ctx.stroke();
     ctx.restore();
   }
-  if (!classic) {
-    packedBitmap.left = left;
-    packedBitmap.top = top;
-    ui.positionXValue.textContent = `${left} px · ${(left * 38 / canvasSize).toFixed(1)} mm`;
-    ui.positionYValue.textContent = `${top} px · ${(top * 38 / canvasSize).toFixed(1)} mm`;
-    syncNumberInput(ui.positionX, ui.positionXNumber);
-    syncNumberInput(ui.positionY, ui.positionYNumber);
-  }
-  updatePlacementHelp();
+  packedBitmap.left = classic ? 0 : artworkLeft;
+  packedBitmap.top = classic ? 0 : artworkTop;
   const millimetersPerPixel = 38 / canvasSize;
-  ui.dimensions.textContent = classic
-    ? `512 × 512 px · 38 × 38 mm`
-    : `${packedBitmap.width} × ${packedBitmap.height} px · ${(packedBitmap.width * millimetersPerPixel).toFixed(1)} × ${(packedBitmap.height * millimetersPerPixel).toFixed(1)} mm at (${left}, ${top})`;
+  ui.dimensions.textContent = `${artworkWidth} × ${artworkHeight} px · ${(artworkWidth * millimetersPerPixel).toFixed(1)} × ${(artworkHeight * millimetersPerPixel).toFixed(1)} mm at (${artworkLeft}, ${artworkTop})`;
   ui.preview.style.display = 'block'; ui.emptyPreview.style.display = 'none';
+}
+
+function cropSelectionFromEdges() {
+  return {
+    x1: cropEdges.left / 100,
+    y1: cropEdges.top / 100,
+    x2: 1 - cropEdges.right / 100,
+    y2: 1 - cropEdges.bottom / 100,
+  };
+}
+
+function renderCropEditor() {
+  if (!sourceImage || editorMode !== 'crop') return;
+  const maximum = Number(protocolProfiles[ui.protocol.value].max_width);
+  ui.preview.width = maximum;
+  ui.preview.height = maximum;
+  const ctx = ui.preview.getContext('2d');
+  ctx.fillStyle = '#e5e6e2';
+  ctx.fillRect(0, 0, maximum, maximum);
+  const padding = Math.max(18, Math.round(maximum * .045));
+  const [displayWidth, displayHeight] = fitDimensions(
+    sourceImage.naturalWidth,
+    sourceImage.naturalHeight,
+    maximum - padding * 2,
+    maximum - padding * 2,
+  );
+  const imageX = Math.floor((maximum - displayWidth) / 2);
+  const imageY = Math.floor((maximum - displayHeight) / 2);
+  ctx.drawImage(sourceImage, imageX, imageY, displayWidth, displayHeight);
+  cropDraft ||= cropSelectionFromEdges();
+  const selection = {
+    left: imageX + cropDraft.x1 * displayWidth,
+    top: imageY + cropDraft.y1 * displayHeight,
+    right: imageX + cropDraft.x2 * displayWidth,
+    bottom: imageY + cropDraft.y2 * displayHeight,
+  };
+  cropEditor = { imageX, imageY, displayWidth, displayHeight, selection };
+  ctx.fillStyle = 'rgba(12, 14, 16, .58)';
+  ctx.fillRect(imageX, imageY, displayWidth, selection.top - imageY);
+  ctx.fillRect(imageX, selection.bottom, displayWidth, imageY + displayHeight - selection.bottom);
+  ctx.fillRect(imageX, selection.top, selection.left - imageX, selection.bottom - selection.top);
+  ctx.fillRect(selection.right, selection.top, imageX + displayWidth - selection.right, selection.bottom - selection.top);
+  ctx.save();
+  ctx.strokeStyle = '#ffb84d';
+  ctx.fillStyle = 'white';
+  ctx.lineWidth = Math.max(2, maximum / 275);
+  ctx.strokeRect(selection.left + .5, selection.top + .5, selection.right - selection.left, selection.bottom - selection.top);
+  const handle = Math.max(8, maximum / 60);
+  const points = [
+    [selection.left, selection.top], [(selection.left + selection.right) / 2, selection.top], [selection.right, selection.top],
+    [selection.left, (selection.top + selection.bottom) / 2], [selection.right, (selection.top + selection.bottom) / 2],
+    [selection.left, selection.bottom], [(selection.left + selection.right) / 2, selection.bottom], [selection.right, selection.bottom],
+  ];
+  for (const [x, y] of points) {
+    ctx.fillRect(x - handle / 2, y - handle / 2, handle, handle);
+    ctx.strokeRect(x - handle / 2, y - handle / 2, handle, handle);
+  }
+  ctx.restore();
+  const widthPercent = Math.round((cropDraft.x2 - cropDraft.x1) * 100);
+  const heightPercent = Math.round((cropDraft.y2 - cropDraft.y1) * 100);
+  ui.dimensions.textContent = `Crop selection · ${widthPercent}% × ${heightPercent}%`;
+  ui.preview.style.display = 'block';
+  ui.emptyPreview.style.display = 'none';
+}
+
+function setEditorMode(mode) {
+  if (!sourceImage && mode !== 'move') return;
+  editorMode = mode;
+  pointerDrag = null;
+  if (mode === 'crop') {
+    cropDraft = cropSelectionFromEdges();
+    renderCropEditor();
+  } else {
+    cropEditor = null;
+    if (packedBitmap && preparedImageData) renderPlacement();
+    else rebuildPreview();
+  }
+  updateEditorUI();
+  updateButtons();
+}
+
+function updateEditorUI() {
+  const hasImage = Boolean(sourceImage);
+  const editingLocked = Boolean(latestStatus.uploading || latestStatus.device_running || actionPending || preparePending);
+  ui.moveTool.disabled = !hasImage || editingLocked;
+  ui.cropTool.disabled = !hasImage || editingLocked;
+  for (const control of [ui.rotateLeft, ui.rotateRight, ui.flipHorizontal, ui.flipVertical, ui.lockAspect]) {
+    control.disabled = !hasImage || editingLocked || editorMode === 'crop';
+  }
+  ui.moveTool.classList.toggle('active', editorMode === 'move' && hasImage);
+  ui.cropTool.classList.toggle('active', editorMode === 'crop');
+  ui.pointMode.classList.toggle('active', editorMode === 'point');
+  ui.cropActions.hidden = editorMode !== 'crop';
+  ui.preview.classList.toggle('edit-move', editorMode === 'move' && hasImage);
+  ui.preview.classList.toggle('edit-crop', editorMode === 'crop');
+  ui.preview.classList.toggle('point-mode', editorMode === 'point');
+  if (!hasImage) {
+    ui.editorHelp.textContent = 'Choose an image, then drag it directly in the preview.';
+  } else if (editorMode === 'crop') {
+    ui.editorHelp.textContent = 'Drag the crop edges or corners on the original image; drag inside to move the selection. Apply when ready.';
+  } else if (editorMode === 'point') {
+    ui.editorHelp.textContent = laserPoint
+      ? `Laser target: ${laserPoint.x}, ${laserPoint.y}. Click elsewhere to move it.`
+      : 'Click the preview to move the idle positioning laser. This tool physically moves the machine.';
+  } else {
+    ui.editorHelp.textContent = 'Drag the artwork to move it. Drag any corner handle to resize it.';
+  }
 }
 
 function capabilities() {
@@ -442,14 +508,16 @@ function updateButtons() {
   ui.connect.disabled = connected || connectPending || !ui.port.value;
   ui.disconnect.disabled = !connected || uploading || connectPending;
   const busy = actionPending || preparePending;
-  ui.start.disabled = !connected || uploading || busy || !packedBitmap || capabilities().engrave === false;
+  const cropOpen = editorMode === 'crop';
+  ui.start.disabled = !connected || uploading || busy || cropOpen || !packedBitmap || capabilities().engrave === false;
   ui.outline.textContent = outlineActive ? 'Stop outline' : 'Low-power outline';
-  ui.outline.disabled = !connected || uploading || busy || !capabilities().outline || (!outlineActive && !packedBitmap);
+  ui.outline.disabled = !connected || uploading || busy || cropOpen || !capabilities().outline || (!outlineActive && !packedBitmap);
   ui.stop.disabled = !connected;
   const pointUnavailable = !connected || Boolean(latestStatus.device_running) || !packedBitmap || !capabilities().point;
-  if (pointModeEnabled && pointUnavailable) {
-    pointModeEnabled = false;
-    updatePointModeUI();
+  if (editorMode === 'point' && pointUnavailable) {
+    editorMode = 'move';
+    updateEditorUI();
+    renderPlacement();
   }
   ui.pointMode.disabled = pointUnavailable || uploading || busy;
   $$('[data-action]').forEach(button => {
@@ -463,20 +531,7 @@ function updateButtons() {
     if (capabilities().placement && ['up', 'down', 'left', 'right', 'home', 'center'].includes(action)) allowed &&= Boolean(packedBitmap);
     button.disabled = !allowed;
   });
-}
-
-function updatePointModeUI() {
-  ui.pointMode.textContent = pointModeEnabled ? 'Disable click-to-move' : 'Enable click-to-move';
-  ui.preview.classList.toggle('point-mode', pointModeEnabled);
-  if (pointModeEnabled) {
-    ui.pointHelp.textContent = laserPoint
-      ? `Laser target: ${laserPoint.x}, ${laserPoint.y}. Click another point to move it.`
-      : 'Click a point in the preview to move the idle positioning laser there.';
-  } else {
-    ui.pointHelp.textContent = laserPoint
-      ? `Last laser target: ${laserPoint.x}, ${laserPoint.y}. Enable to move again.`
-      : 'Click-to-move is off, preventing accidental movement.';
-  }
+  updateEditorUI();
 }
 
 function renderStatus(status) {
@@ -584,11 +639,13 @@ ui.imageFile.addEventListener('change', () => {
     rotation = 0;
     flipX = false;
     flipY = false;
-    for (const control of [ui.cropLeft, ui.cropRight, ui.cropTop, ui.cropBottom]) control.value = '0';
+    cropEdges = { left: 0, right: 0, top: 0, bottom: 0 };
+    cropDraft = null;
+    editorMode = 'move';
     updateTransformState();
     imageRevision += 1;
-    sizeKey = '';
-    placementKey = '';
+    resetArtworkGeometry();
+    updateEditorUI();
     rebuildPreview();
     URL.revokeObjectURL(image.src);
   };
@@ -598,37 +655,28 @@ ui.imageFile.addEventListener('change', () => {
 ui.renderMode.addEventListener('change', () => { updateRenderModeUI(); rebuildPreview(); });
 ui.threshold.addEventListener('input', () => { updateRenderModeUI(); rebuildPreview(); });
 ui.invert.addEventListener('change', rebuildPreview);
-ui.artworkWidth.addEventListener('input', () => { ui.artworkWidthNumber.value = ui.artworkWidth.value; rebuildPreview(); });
-ui.artworkWidthNumber.addEventListener('change', () => applyNumberInput(ui.artworkWidth, ui.artworkWidthNumber, rebuildPreview));
-ui.artworkHeight.addEventListener('input', () => { ui.artworkHeightNumber.value = ui.artworkHeight.value; rebuildPreview(); });
-ui.artworkHeightNumber.addEventListener('change', () => applyNumberInput(ui.artworkHeight, ui.artworkHeightNumber, rebuildPreview));
-ui.lockAspect.addEventListener('change', rebuildPreview);
+ui.lockAspect.addEventListener('change', updateEditorUI);
 ui.rotateLeft.addEventListener('click', () => {
   rotation = (rotation + 270) % 360;
-  imageRevision += 1; sizeKey = ''; placementKey = '';
+  imageRevision += 1; resetArtworkGeometry();
   updateTransformState(); rebuildPreview();
 });
 ui.rotateRight.addEventListener('click', () => {
   rotation = (rotation + 90) % 360;
-  imageRevision += 1; sizeKey = ''; placementKey = '';
+  imageRevision += 1; resetArtworkGeometry();
   updateTransformState(); rebuildPreview();
 });
 ui.flipHorizontal.addEventListener('click', () => {
-  flipX = !flipX; imageRevision += 1;
+  flipX = !flipX; imageRevision += 1; resetArtworkGeometry();
   updateTransformState(); rebuildPreview();
 });
 ui.flipVertical.addEventListener('click', () => {
-  flipY = !flipY; imageRevision += 1;
+  flipY = !flipY; imageRevision += 1; resetArtworkGeometry();
   updateTransformState(); rebuildPreview();
 });
-for (const cropControl of [ui.cropLeft, ui.cropRight, ui.cropTop, ui.cropBottom]) {
-  cropControl.addEventListener('change', () => {
-    cropValue(cropControl); imageRevision += 1; sizeKey = ''; placementKey = ''; rebuildPreview();
-  });
-}
 ui.resetCrop.addEventListener('click', () => {
-  for (const control of [ui.cropLeft, ui.cropRight, ui.cropTop, ui.cropBottom]) control.value = '0';
-  imageRevision += 1; sizeKey = ''; placementKey = ''; rebuildPreview();
+  cropDraft = { x1: 0, y1: 0, x2: 1, y2: 1 };
+  renderCropEditor();
 });
 ui.advancedEnabled.addEventListener('change', () => { updateAdvancedUI(); rebuildPreview(); });
 for (const control of [ui.brightness, ui.contrast, ui.gamma, ui.sharpen]) {
@@ -640,10 +688,6 @@ ui.resetAdvanced.addEventListener('click', () => {
   ui.ditherAlgorithm.value = 'floyd-steinberg';
   updateAdvancedValues(); rebuildPreview();
 });
-ui.positionX.addEventListener('input', () => { ui.positionXNumber.value = ui.positionX.value; renderPlacement(); });
-ui.positionXNumber.addEventListener('change', () => applyNumberInput(ui.positionX, ui.positionXNumber, renderPlacement));
-ui.positionY.addEventListener('input', () => { ui.positionYNumber.value = ui.positionY.value; renderPlacement(); });
-ui.positionYNumber.addEventListener('change', () => applyNumberInput(ui.positionY, ui.positionYNumber, renderPlacement));
 ui.protocol.addEventListener('change', updateProtocolUI);
 ui.materialPreset.addEventListener('change', () => setMaterialPreset(ui.materialPreset.value));
 ui.burnTime.addEventListener('input', () => {
@@ -697,12 +741,32 @@ ui.stop.addEventListener('click', async () => {
     updateButtons();
   }
 });
+ui.moveTool.addEventListener('click', () => setEditorMode('move'));
+ui.cropTool.addEventListener('click', () => setEditorMode(editorMode === 'crop' ? 'move' : 'crop'));
+ui.applyCrop.addEventListener('click', () => {
+  if (!cropDraft) return;
+  cropEdges = {
+    left: Math.round(cropDraft.x1 * 100),
+    right: Math.round((1 - cropDraft.x2) * 100),
+    top: Math.round(cropDraft.y1 * 100),
+    bottom: Math.round((1 - cropDraft.y2) * 100),
+  };
+  cropDraft = null;
+  imageRevision += 1;
+  resetArtworkGeometry();
+  editorMode = 'move';
+  updateEditorUI();
+  rebuildPreview();
+});
+ui.cancelCrop.addEventListener('click', () => {
+  cropDraft = null;
+  setEditorMode('move');
+});
 ui.pointMode.addEventListener('click', () => {
-  pointModeEnabled = !pointModeEnabled;
-  updatePointModeUI();
+  setEditorMode(editorMode === 'point' ? 'move' : 'point');
 });
 ui.preview.addEventListener('click', async event => {
-  if (!pointModeEnabled || actionPending || ui.pointMode.disabled) return;
+  if (editorMode !== 'point' || actionPending || ui.pointMode.disabled) return;
   const rect = ui.preview.getBoundingClientRect();
   const maximum = Number(capabilities().max_width);
   const x = Math.max(0, Math.min(maximum - 1, Math.floor((event.clientX - rect.left) * ui.preview.width / rect.width)));
@@ -710,13 +774,192 @@ ui.preview.addEventListener('click', async event => {
   const previous = laserPoint;
   laserPoint = { x, y };
   renderPlacement();
-  updatePointModeUI();
+  updateEditorUI();
   if (!await ensureOutlineStopped() || !await ensurePrepared() || !await sendAction('point', { x, y })) {
     laserPoint = previous;
     renderPlacement();
-    updatePointModeUI();
+    updateEditorUI();
   }
 });
+
+function canvasPoint(event) {
+  const rect = ui.preview.getBoundingClientRect();
+  return {
+    x: (event.clientX - rect.left) * ui.preview.width / rect.width,
+    y: (event.clientY - rect.top) * ui.preview.height / rect.height,
+    hitRadius: 13 * ui.preview.width / rect.width,
+  };
+}
+
+function artworkHit(point) {
+  const corners = {
+    nw: [artworkLeft, artworkTop],
+    ne: [artworkLeft + artworkWidth, artworkTop],
+    sw: [artworkLeft, artworkTop + artworkHeight],
+    se: [artworkLeft + artworkWidth, artworkTop + artworkHeight],
+  };
+  for (const [handle, [x, y]] of Object.entries(corners)) {
+    if (Math.hypot(point.x - x, point.y - y) <= point.hitRadius) return handle;
+  }
+  if (point.x >= artworkLeft && point.x <= artworkLeft + artworkWidth
+      && point.y >= artworkTop && point.y <= artworkTop + artworkHeight) return 'move';
+  return null;
+}
+
+function beginArtworkDrag(event, point) {
+  if (!packedBitmap || artworkWidth === null) return;
+  const handle = artworkHit(point);
+  if (!handle) return;
+  pointerDrag = {
+    kind: handle,
+    pointerId: event.pointerId,
+    startX: point.x,
+    startY: point.y,
+    left: artworkLeft,
+    top: artworkTop,
+    width: artworkWidth,
+    height: artworkHeight,
+  };
+  ui.preview.setPointerCapture(event.pointerId);
+  event.preventDefault();
+}
+
+function updateArtworkDrag(point) {
+  const maximum = Number(protocolProfiles[ui.protocol.value].max_width);
+  if (pointerDrag.kind === 'move') {
+    artworkLeft = pointerDrag.left + point.x - pointerDrag.startX;
+    artworkTop = pointerDrag.top + point.y - pointerDrag.startY;
+    clampArtwork(maximum);
+    renderPlacement();
+    return;
+  }
+  const leftSide = pointerDrag.kind.includes('w');
+  const topSide = pointerDrag.kind.includes('n');
+  const directionX = leftSide ? -1 : 1;
+  const directionY = topSide ? -1 : 1;
+  const anchorX = leftSide ? pointerDrag.left + pointerDrag.width : pointerDrag.left;
+  const anchorY = topSide ? pointerDrag.top + pointerDrag.height : pointerDrag.top;
+  const maximumWidth = directionX > 0 ? maximum - anchorX : anchorX;
+  const maximumHeight = directionY > 0 ? maximum - anchorY : anchorY;
+  let nextWidth = Math.max(8, Math.min(maximumWidth, Math.abs(point.x - anchorX)));
+  let nextHeight = Math.max(8, Math.min(maximumHeight, Math.abs(point.y - anchorY)));
+  if (ui.lockAspect.checked) {
+    const widthScale = nextWidth / pointerDrag.width;
+    const heightScale = nextHeight / pointerDrag.height;
+    const wantedScale = Math.abs(widthScale - 1) >= Math.abs(heightScale - 1) ? widthScale : heightScale;
+    const minimumScale = Math.max(8 / pointerDrag.width, 8 / pointerDrag.height);
+    const maximumScale = Math.min(maximumWidth / pointerDrag.width, maximumHeight / pointerDrag.height);
+    const scale = Math.max(minimumScale, Math.min(maximumScale, wantedScale));
+    nextWidth = pointerDrag.width * scale;
+    nextHeight = pointerDrag.height * scale;
+  }
+  artworkWidth = Math.max(1, Math.round(nextWidth));
+  artworkHeight = Math.max(1, Math.round(nextHeight));
+  artworkLeft = Math.round(directionX > 0 ? anchorX : anchorX - artworkWidth);
+  artworkTop = Math.round(directionY > 0 ? anchorY : anchorY - artworkHeight);
+  clampArtwork(maximum);
+  rebuildPreview();
+}
+
+function cropHit(point) {
+  if (!cropEditor) return null;
+  const { left, top, right, bottom } = cropEditor.selection;
+  const radius = point.hitRadius;
+  const nearLeft = Math.abs(point.x - left) <= radius;
+  const nearRight = Math.abs(point.x - right) <= radius;
+  const nearTop = Math.abs(point.y - top) <= radius;
+  const nearBottom = Math.abs(point.y - bottom) <= radius;
+  if (nearLeft && nearTop) return 'nw';
+  if (nearRight && nearTop) return 'ne';
+  if (nearLeft && nearBottom) return 'sw';
+  if (nearRight && nearBottom) return 'se';
+  if (nearTop && point.x >= left && point.x <= right) return 'n';
+  if (nearBottom && point.x >= left && point.x <= right) return 's';
+  if (nearLeft && point.y >= top && point.y <= bottom) return 'w';
+  if (nearRight && point.y >= top && point.y <= bottom) return 'e';
+  if (point.x >= left && point.x <= right && point.y >= top && point.y <= bottom) return 'move';
+  const { imageX, imageY, displayWidth, displayHeight } = cropEditor;
+  if (point.x >= imageX && point.x <= imageX + displayWidth
+      && point.y >= imageY && point.y <= imageY + displayHeight) return 'new';
+  return null;
+}
+
+function normalizedCropPoint(point) {
+  const { imageX, imageY, displayWidth, displayHeight } = cropEditor;
+  return {
+    x: Math.max(0, Math.min(1, (point.x - imageX) / displayWidth)),
+    y: Math.max(0, Math.min(1, (point.y - imageY) / displayHeight)),
+  };
+}
+
+function beginCropDrag(event, point) {
+  const handle = cropHit(point);
+  if (!handle) return;
+  const normalized = normalizedCropPoint(point);
+  pointerDrag = {
+    kind: handle,
+    pointerId: event.pointerId,
+    startX: normalized.x,
+    startY: normalized.y,
+    selection: { ...cropDraft },
+  };
+  if (handle === 'new') cropDraft = { x1: normalized.x, y1: normalized.y, x2: normalized.x, y2: normalized.y };
+  ui.preview.setPointerCapture(event.pointerId);
+  event.preventDefault();
+}
+
+function updateCropDrag(point) {
+  const current = normalizedCropPoint(point);
+  const start = pointerDrag.selection;
+  const minimum = .02;
+  if (pointerDrag.kind === 'new') {
+    cropDraft = {
+      x1: Math.min(pointerDrag.startX, current.x),
+      y1: Math.min(pointerDrag.startY, current.y),
+      x2: Math.max(pointerDrag.startX, current.x),
+      y2: Math.max(pointerDrag.startY, current.y),
+    };
+  } else if (pointerDrag.kind === 'move') {
+    const width = start.x2 - start.x1;
+    const height = start.y2 - start.y1;
+    const dx = Math.max(-start.x1, Math.min(1 - start.x2, current.x - pointerDrag.startX));
+    const dy = Math.max(-start.y1, Math.min(1 - start.y2, current.y - pointerDrag.startY));
+    cropDraft = { x1: start.x1 + dx, x2: start.x2 + dx, y1: start.y1 + dy, y2: start.y2 + dy };
+    cropDraft.x2 = cropDraft.x1 + width;
+    cropDraft.y2 = cropDraft.y1 + height;
+  } else {
+    cropDraft = { ...start };
+    if (pointerDrag.kind.includes('w')) cropDraft.x1 = Math.min(start.x2 - minimum, current.x);
+    if (pointerDrag.kind.includes('e')) cropDraft.x2 = Math.max(start.x1 + minimum, current.x);
+    if (pointerDrag.kind.includes('n')) cropDraft.y1 = Math.min(start.y2 - minimum, current.y);
+    if (pointerDrag.kind.includes('s')) cropDraft.y2 = Math.max(start.y1 + minimum, current.y);
+  }
+  cropDraft.x1 = Math.max(0, Math.min(1 - minimum, cropDraft.x1));
+  cropDraft.y1 = Math.max(0, Math.min(1 - minimum, cropDraft.y1));
+  cropDraft.x2 = Math.max(cropDraft.x1 + minimum, Math.min(1, cropDraft.x2));
+  cropDraft.y2 = Math.max(cropDraft.y1 + minimum, Math.min(1, cropDraft.y2));
+  renderCropEditor();
+}
+
+ui.preview.addEventListener('pointerdown', event => {
+  if (latestStatus.uploading || latestStatus.device_running || actionPending || preparePending) return;
+  const point = canvasPoint(event);
+  if (editorMode === 'move') beginArtworkDrag(event, point);
+  if (editorMode === 'crop') beginCropDrag(event, point);
+});
+ui.preview.addEventListener('pointermove', event => {
+  if (!pointerDrag || event.pointerId !== pointerDrag.pointerId) return;
+  const point = canvasPoint(event);
+  if (editorMode === 'move') updateArtworkDrag(point);
+  if (editorMode === 'crop') updateCropDrag(point);
+});
+function finishPointerDrag(event) {
+  if (!pointerDrag || event.pointerId !== pointerDrag.pointerId) return;
+  if (ui.preview.hasPointerCapture(event.pointerId)) ui.preview.releasePointerCapture(event.pointerId);
+  pointerDrag = null;
+}
+ui.preview.addEventListener('pointerup', finishPointerDrag);
+ui.preview.addEventListener('pointercancel', finishPointerDrag);
 
 async function ensureOutlineStopped() {
   if (ui.protocol.value !== 'dk8-official' || (outlineStateKnown && !outlineActive)) return true;
@@ -746,10 +989,14 @@ function currentPreparationKey() {
     rotation,
     Number(flipX),
     Number(flipY),
-    ui.cropLeft.value,
-    ui.cropRight.value,
-    ui.cropTop.value,
-    ui.cropBottom.value,
+    cropEdges.left,
+    cropEdges.right,
+    cropEdges.top,
+    cropEdges.bottom,
+    artworkWidth,
+    artworkHeight,
+    artworkLeft,
+    artworkTop,
     packedBitmap.width,
     packedBitmap.height,
     packedBitmap.left,
@@ -799,8 +1046,8 @@ async function ensurePrepared() {
 function sendPositionAction(action) {
   if (!packedBitmap) return;
   const step = 4;
-  let left = Number(ui.positionX.value);
-  let top = Number(ui.positionY.value);
+  let left = artworkLeft;
+  let top = artworkTop;
   if (action === 'up') top -= step;
   if (action === 'down') top += step;
   if (action === 'left') left -= step;
@@ -810,10 +1057,10 @@ function sendPositionAction(action) {
     left = Math.floor((Number(capabilities().max_width) - packedBitmap.width) / 2);
     top = Math.floor((Number(capabilities().max_height) - packedBitmap.height) / 2);
   }
-  left = Math.max(0, Math.min(Number(ui.positionX.max), left));
-  top = Math.max(0, Math.min(Number(ui.positionY.max), top));
-  ui.positionX.value = String(left);
-  ui.positionY.value = String(top);
+  left = Math.max(0, Math.min(Number(capabilities().max_width) - artworkWidth, left));
+  top = Math.max(0, Math.min(Number(capabilities().max_height) - artworkHeight, top));
+  artworkLeft = left;
+  artworkTop = top;
   renderPlacement();
   sendAction(action, { width: packedBitmap.width, height: packedBitmap.height, left, top });
 }
@@ -836,6 +1083,6 @@ updateAdvancedValues();
 updateAdvancedUI();
 updateTransformState();
 updateProtocolUI();
-updatePointModeUI();
+updateEditorUI();
 refreshPorts().then(poll);
 setInterval(poll, 800);

@@ -13,6 +13,7 @@
 }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 
 body {
   margin: 0;
@@ -104,13 +105,6 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
 .check input { flex: 0 0 auto; margin-top: 2px; accent-color: var(--accent); }
 .file-picker { padding: 15px; text-align: center; color: var(--text); background: var(--surface-2); border: 1px dashed #4d5c65; border-radius: 10px; cursor: pointer; }
 .file-picker input { display: none; }
-.field-label { display: block; margin: 16px 0 8px; color: var(--muted); font-size: .82rem; font-weight: 650; }
-.image-tools { margin-top: 16px; padding-top: 2px; border-top: 1px solid var(--line); }
-.button-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
-.button-grid.compact button { min-height: 36px; padding: 7px 8px; font-size: .76rem; }
-.crop-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
-.crop-grid label { margin: 0; font-size: .7rem; text-align: center; }
-.crop-grid input { margin-top: 5px; padding: 7px 3px; text-align: center; }
 button.subtle { width: 100%; min-height: 34px; margin-top: 8px; padding: 6px 9px; font-size: .74rem; }
 .advanced-panel { margin-top: 16px; padding: 11px 12px; background: #13181b; border: 1px solid var(--line); border-radius: 10px; }
 .advanced-panel summary { color: var(--text); font-size: .82rem; font-weight: 750; cursor: pointer; }
@@ -125,11 +119,20 @@ button.subtle { width: 100%; min-height: 34px; margin-top: 8px; padding: 6px 9px
 .preview { min-height: 580px; }
 .canvas-wrap { position: relative; display: grid; place-items: center; min-height: 505px; margin-top: 18px; overflow: hidden; background-color: #e8e9e6; background-image: linear-gradient(45deg, #dfe1dc 25%, transparent 25%), linear-gradient(-45deg, #dfe1dc 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #dfe1dc 75%), linear-gradient(-45deg, transparent 75%, #dfe1dc 75%); background-size: 24px 24px; background-position: 0 0, 0 12px, 12px -12px, -12px 0; border-radius: 10px; }
 #previewCanvas { display: none; max-width: 100%; max-height: 490px; image-rendering: pixelated; background: white; box-shadow: 0 7px 30px rgba(0,0,0,.28); }
-#previewCanvas.point-mode { cursor: crosshair; outline: 2px solid var(--accent); outline-offset: 3px; }
+#previewCanvas.edit-move { cursor: move; outline: 2px solid var(--accent); outline-offset: 3px; touch-action: none; }
+#previewCanvas.edit-crop { cursor: crosshair; outline: 2px solid #ffc46b; outline-offset: 3px; touch-action: none; }
+#previewCanvas.point-mode { cursor: crosshair; outline: 2px solid #ff786e; outline-offset: 3px; }
 #emptyPreview { color: #687078; font-size: .85rem; }
-.preview-toolbar { display: flex; align-items: center; gap: 12px; margin-top: 14px; }
-.preview-toolbar button { flex: 0 0 auto; }
+.preview-toolbar { display: grid; gap: 9px; margin-top: 14px; }
+.tool-row { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
+.tool-row button { flex: 0 0 auto; min-height: 36px; padding: 7px 11px; font-size: .78rem; }
+.tool-row button.active { color: var(--accent); background: var(--accent-dark); border-color: #398262; }
+.tool-row .icon-tool { width: 38px; padding: 7px; font-size: 1.05rem; }
+.transform-tools { padding-top: 8px; border-top: 1px solid var(--line); }
+.compact-check { margin: 0 0 0 4px; }
+.crop-actions { padding: 9px; background: #352917; border: 1px solid #75562b; border-radius: 9px; }
 .preview-toolbar .hint { margin: 0; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 
 .control-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 18px; }
 .control-grid .wide { grid-column: span 3; }
@@ -143,9 +146,5 @@ footer { padding: 22px 0 36px; color: #6f7a81; font-size: .75rem; text-align: ce
   .workspace { grid-row: 1; }
   .preview { min-height: 420px; }
   .canvas-wrap { min-height: 340px; }
-  .preview-toolbar { align-items: stretch; flex-direction: column; }
-}
-
-@media (max-width: 420px) {
-  .crop-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .tool-row { align-items: stretch; }
 }

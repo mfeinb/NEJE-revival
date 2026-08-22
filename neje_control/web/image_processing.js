@@ -8,11 +8,11 @@
   const clamp = value => Math.max(0, Math.min(255, value));
 
   function transformGeometry(sourceWidth, sourceHeight, crop = {}, rotation = 0) {
-    const percent = value => Math.max(0, Math.min(45, Math.round(Number(value || 0))));
+    const percent = value => Math.max(0, Math.min(98, Math.round(Number(value || 0))));
     const left = percent(crop.left);
-    const right = percent(crop.right);
+    const right = Math.min(percent(crop.right), 99 - left);
     const top = percent(crop.top);
-    const bottom = percent(crop.bottom);
+    const bottom = Math.min(percent(crop.bottom), 99 - top);
     const sx = Math.round(sourceWidth * left / 100);
     const sy = Math.round(sourceHeight * top / 100);
     const cropWidth = Math.max(1, sourceWidth - sx - Math.round(sourceWidth * right / 100));

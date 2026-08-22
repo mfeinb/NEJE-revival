@@ -14,8 +14,8 @@ and a browser interface that runs entirely on your computer.
 - Auto-detection across the official DK-8-KZ v4.0/v4.2 profiles, plus four
   alternative community-documented protocols
 - PNG, JPEG, WebP, and BMP input (decoded locally by the browser)
-- Crop, 90° rotation, horizontal/vertical flip, independent width/height, and
-  optional aspect-ratio locking
+- Mouse-driven crop, placement, and corner-handle resizing directly on the
+  preview, plus 90° rotation, flips, and optional aspect-ratio locking
 - Threshold conversion plus Floyd–Steinberg, Atkinson, or ordered 4×4 dithering
 - Opt-in advanced brightness, contrast, gamma, and sharpening controls
 - Conservative starting presets for kraft paper/cardstock, gray cardboard,
@@ -115,8 +115,12 @@ never start engraving.
 
 ## Image controls and material presets
 
-Transform and crop controls are always available. Width and height remain
-linked until **Lock image aspect ratio** is turned off. Advanced processing is
+The complete crop and placement workflow lives on the preview: choose **Move &
+resize**, drag the artwork to position it, and drag any corner to size it. Choose
+**Crop** to drag a visual selection by its edges or corners, then apply it.
+Width and height remain linked until **Lock proportions** is turned off. These
+edits do not command the engraver; only Laser position, machine controls,
+Outline, and Upload & engrave communicate with the device. Advanced processing is
 deliberately opt-in: expand **Advanced image controls**, then check **Enable
 advanced processing** to use brightness, contrast, gamma, sharpening, or a
 different dither algorithm.

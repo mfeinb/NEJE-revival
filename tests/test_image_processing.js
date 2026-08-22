@@ -35,5 +35,9 @@ assert.deepEqual(
   transformGeometry(100, 50, { left: 10, right: 20, top: 10, bottom: 20 }, 90),
   { sx: 10, sy: 5, cropWidth: 70, cropHeight: 35, rotation: 90, width: 35, height: 70 },
 );
+assert.deepEqual(
+  transformGeometry(100, 100, { left: 80, right: 80, top: 98, bottom: 98 }, 0),
+  { sx: 80, sy: 98, cropWidth: 1, cropHeight: 1, rotation: 0, width: 1, height: 1 },
+);
 
 console.log('image-processing tests passed');
