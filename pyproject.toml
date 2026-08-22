@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "neje-revival"
+version = "0.1.0"
+description = "A local, cross-platform controller for legacy NEJE DK-8-KZ laser engravers"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = ["pyserial>=3.5,<4"]
+
+[project.scripts]
+neje-revival = "neje_control.server:main"
+
+[tool.setuptools]
+packages = ["neje_control"]
+include-package-data = true
+
+[tool.setuptools.package-data]
+neje_control = ["web/*"]

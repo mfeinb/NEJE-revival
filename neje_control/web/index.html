@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <link rel="icon" href="data:,">
+  <title>NEJE Revival</title>
+  <link rel="stylesheet" href="/styles.css?v=20260821.7">
+</head>
+<body>
+  <header>
+    <div>
+      <p class="eyebrow">DK-8-KZ local controller</p>
+      <h1>NEJE Revival</h1>
+    </div>
+    <div id="connectionBadge" class="badge offline">Disconnected</div>
+  </header>
+
+  <main>
+    <aside>
+      <section class="panel">
+        <h2>1 · Connect</h2>
+        <label for="serialPort">Serial port</label>
+        <div class="row">
+          <select id="serialPort"></select>
+          <button id="refreshPorts" class="secondary" title="Refresh ports">↻</button>
+        </div>
+
+        <label for="protocol">Firmware protocol</label>
+        <select id="protocol">
+          <option value="dk8-official">DK-8-KZ official (auto-detect)</option>
+          <option value="extended-kz">KZ framed (2019+)</option>
+          <option value="classic-v3">Classic v3</option>
+          <option value="classic-v2">Classic v2</option>
+          <option value="classic-v1">Classic v1</option>
+        </select>
+        <p id="protocolHelp" class="hint"></p>
+        <p id="detectedProtocol" class="detected" hidden></p>
+        <p class="power-warning"><strong>Your machine:</strong> the positioning laser stays on at low power while powered. Outline moves that already-lit spot around the artwork rectangle.</p>
+
+        <div class="row">
+          <button id="connect">Connect</button>
+          <button id="disconnect" class="secondary">Disconnect</button>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>2 · Image</h2>
+        <label class="file-picker" for="imageFile">
+          <span>Choose PNG, JPEG, WebP, or BMP</span>
+          <input id="imageFile" type="file" accept="image/png,image/jpeg,image/webp,image/bmp">
+        </label>
+
+        <label for="renderMode">Image conversion</label>
+        <select id="renderMode">
+          <option value="threshold">Threshold · text and logos</option>
+          <option value="dither">Grayscale dither · photos and detail</option>
+        </select>
+        <p id="renderModeHelp" class="hint">Crisp black-or-white conversion controlled by the threshold.</p>
+
+        <label for="threshold"><span id="toneLabel">Threshold</span> <output id="thresholdValue">128</output></label>
+        <input id="threshold" type="range" min="0" max="255" value="128">
+        <label class="check"><input id="invert" type="checkbox"> Invert light and dark</label>
+
+        <label for="artworkWidth">Artwork width <output id="artworkWidthValue">—</output></label>
+        <div class="range-with-number">
+          <input id="artworkWidth" type="range" min="1" max="550" value="550" disabled>
+          <input id="artworkWidthNumber" type="number" min="1" max="550" value="550" aria-label="Artwork width in pixels" disabled>
+        </div>
+        <div id="placementControls">
+          <label for="positionX">Artwork X <output id="positionXValue">0</output></label>
+          <div class="range-with-number">
+            <input id="positionX" type="range" min="0" max="0" value="0">
+            <input id="positionXNumber" type="number" min="0" max="0" value="0" aria-label="Artwork X position in pixels">
+          </div>
+          <label for="positionY">Artwork Y <output id="positionYValue">0</output></label>
+          <div class="range-with-number">
+            <input id="positionY" type="range" min="0" max="0" value="0">
+            <input id="positionYNumber" type="number" min="0" max="0" value="0" aria-label="Artwork Y position in pixels">
+          </div>
+          <p id="placementHelp" class="hint">Changes where the image is stored in the engraving area.</p>
+        </div>
+        <p id="imageInfo" class="hint">Choose an image to prepare a monochrome burn mask.</p>
+      </section>
+
+      <section class="panel">
+        <h2>3 · Engrave</h2>
+        <label for="burnTime">Burn time <output id="burnTimeValue">20</output></label>
+        <input id="burnTime" type="range" min="1" max="100" value="20">
+        <div id="powerControls">
+          <label for="power">Laser power <output id="powerValue">10%</output></label>
+          <input id="power" type="range" min="1" max="100" value="10">
+        </div>
+
+        <div class="safety">
+          <strong>Before enabling the laser</strong>
+          <label class="check"><input id="safetyAck" type="checkbox"> Enclosure/shield and wavelength-rated eye protection are in place; ventilation is on; the material is attended and nonflammable.</label>
+        </div>
+
+        <div class="row">
+          <button id="outline" class="secondary">Low-power outline</button>
+          <button id="start" class="danger">Upload & engrave</button>
+        </div>
+        <button id="stop" class="stop">Stop / reset</button>
+      </section>
+    </aside>
+
+    <div class="workspace">
+      <section class="preview panel">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Burn mask</p>
+            <h2>Black pixels will be engraved</h2>
+          </div>
+          <span id="dimensions" class="mono">—</span>
+        </div>
+        <div class="preview-toolbar">
+          <button id="pointMode" class="secondary" disabled>Enable click-to-move</button>
+          <span id="pointHelp" class="hint">Load an image and connect the engraver to position its idle laser.</span>
+        </div>
+        <div class="canvas-wrap">
+          <canvas id="previewCanvas" width="490" height="490"></canvas>
+          <div id="emptyPreview">Image preview</div>
+        </div>
+      </section>
+
+      <section class="panel controls">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Positioning</p>
+            <h2 id="controlHeading">Machine controls</h2>
+          </div>
+          <span id="controlHint" class="hint">Low-power positioning laser remains on</span>
+        </div>
+        <div class="control-grid">
+          <button data-action="home" class="secondary">Top-left</button>
+          <button data-action="up" class="secondary">↑</button>
+          <button data-action="center" class="secondary">Center</button>
+          <button data-action="left" class="secondary">←</button>
+          <button data-action="down" class="secondary">↓</button>
+          <button data-action="right" class="secondary">→</button>
+          <button data-action="pause" class="secondary wide">Pause</button>
+          <button data-action="resume" class="secondary wide">Resume</button>
+        </div>
+      </section>
+
+      <section class="panel status-panel">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Device status</p>
+            <h2 id="phase">Disconnected</h2>
+          </div>
+          <span id="error" class="error"></span>
+        </div>
+        <progress id="progress" max="100" value="0"></progress>
+        <p id="statusDetail" class="hint">Turn on the engraver and connect its USB data cable.</p>
+      </section>
+    </div>
+  </main>
+
+  <footer>Runs only on this computer at localhost. No image or device data leaves the machine.</footer>
+  <script src="/app.js?v=20260821.8"></script>
+</body>
+</html>
