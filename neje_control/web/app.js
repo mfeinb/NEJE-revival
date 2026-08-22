@@ -95,6 +95,7 @@ const materialPresets = {
   basswood: { burnTime: 15, power: 30 },
   bamboo: { burnTime: 20, power: 35 },
   'vegetable-leather': { burnTime: 12, power: 25 },
+  'black-acrylic': { burnTime: 4, power: 10 },
 };
 
 async function api(path, options = {}) {
@@ -371,7 +372,10 @@ function setMaterialPreset(name) {
   const strengthNote = capabilities().power
     ? ` Power is set to a conservative ${preset.power}% starting point.`
     : ' This mode-4 controller has no independent laser-strength command; only burn time is changed.';
-  ui.presetHelp.innerHTML = `<strong>Starting point applied:</strong>${strengthNote} Test on scrap and remain with the machine. Never use PVC/vinyl, unknown plastics or coatings, or chrome-tanned leather.`;
+  const materialNote = name === 'black-acrylic'
+    ? ' Use only supplier-confirmed, laser-compatible black cast PMMA with strong outdoor exhaust. White, light-colored, and clear acrylic usually cannot absorb this blue diode effectively; do not compensate with a long exposure. Never process PVC/vinyl, ABS, polycarbonate, or unknown plastic.'
+    : ' Test on scrap and remain with the machine. Never use PVC/vinyl, unknown plastics or coatings, or chrome-tanned leather.';
+  ui.presetHelp.innerHTML = `<strong>Starting point applied:</strong>${strengthNote}${materialNote}`;
 }
 
 function markMaterialCustom() {
@@ -620,11 +624,10 @@ function setEditorMode(mode) {
 
 function updateEditorUI() {
   const hasImage = Boolean(sourceImage);
-  const editingLocked = Boolean(latestStatus.uploading || latestStatus.device_running || actionPending || preparePending);
-  ui.moveTool.disabled = !hasImage || editingLocked;
-  ui.cropTool.disabled = !hasImage || editingLocked;
+  ui.moveTool.disabled = !hasImage;
+  ui.cropTool.disabled = !hasImage;
   for (const control of [ui.rotateLeft, ui.rotateRight, ui.flipHorizontal, ui.flipVertical, ui.lockAspect]) {
-    control.disabled = !hasImage || editingLocked || editorMode === 'crop';
+    control.disabled = !hasImage || editorMode === 'crop';
   }
   ui.moveTool.classList.toggle('active', editorMode === 'move' && hasImage);
   ui.cropTool.classList.toggle('active', editorMode === 'crop');
@@ -642,7 +645,9 @@ function updateEditorUI() {
       ? `Laser target: ${laserPoint.x}, ${laserPoint.y}. Click elsewhere to move it.`
       : 'Click the preview to move the idle positioning laser. This tool physically moves the machine.';
   } else {
-    ui.editorHelp.textContent = 'Drag the artwork to move it. Drag any corner handle to resize it.';
+    ui.editorHelp.textContent = latestStatus.device_running
+      ? 'Drag to edit the next job; the current engraving is unchanged. Drag any corner handle to resize.'
+      : 'Drag the artwork to move it. Drag any corner handle to resize it.';
   }
 }
 
@@ -1090,7 +1095,6 @@ function updateCropDrag(point) {
 }
 
 ui.preview.addEventListener('pointerdown', event => {
-  if (latestStatus.uploading || latestStatus.device_running || actionPending || preparePending) return;
   const point = canvasPoint(event);
   if (editorMode === 'move') beginArtworkDrag(event, point);
   if (editorMode === 'crop') beginCropDrag(event, point);

@@ -21,7 +21,8 @@ and a browser interface that runs entirely on your computer.
 - Threshold conversion plus Floyd–Steinberg, Atkinson, or ordered 4×4 dithering
 - Opt-in advanced brightness, contrast, gamma, and sharpening controls
 - Conservative starting presets for kraft paper/cardstock, gray cardboard,
-  untreated light wood, bamboo, and vegetable-tanned leather
+  untreated light wood, bamboo, vegetable-tanned leather, and supplier-confirmed
+  black cast acrylic (PMMA)
 - Home, center, jog, low-power outline, pause/resume where the selected firmware supports it
 - Upload progress, cancellation, reset/stop, and explicit laser-safety interlocks
 - Official four-pixel artwork positioning controls and a low-power outline trace
@@ -143,6 +144,10 @@ the preset's low power value as well.
 The included presets intentionally exclude PVC/vinyl, unknown plastics,
 unknown coatings, chrome-tanned leather, reflective materials, and flame-
 retardant stock. Do not assume an unlabeled material is laser-safe.
+Black cast acrylic is the only included plastic preset and starts at very low
+exposure because overheating plastic can melt or ignite. White, light-colored,
+and clear acrylic do not absorb a 450–460 nm blue diode reliably and therefore
+do not get presets; increasing exposure is not a safe substitute for absorption.
 
 ## What to report after the first test
 
