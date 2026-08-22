@@ -513,6 +513,62 @@ function drawArtworkHandles(ctx) {
   ctx.restore();
 }
 
+function drawLaserTarget(ctx, canvasSize) {
+  if (!laserPoint) return;
+  const { x, y } = laserPoint;
+  ctx.save();
+  ctx.strokeStyle = '#e23b32';
+  ctx.fillStyle = 'rgba(255,255,255,.82)';
+  ctx.lineWidth = Math.max(2, canvasSize / 275);
+  ctx.beginPath(); ctx.arc(x + .5, y + .5, 9, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(x - 14, y + .5); ctx.lineTo(x + 15, y + .5);
+  ctx.moveTo(x + .5, y - 14); ctx.lineTo(x + .5, y + 15);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function renderPointCanvas() {
+  const width = Number(capabilities().max_width);
+  const height = Number(capabilities().max_height || width);
+  if (!width || !height) return;
+  ui.preview.width = width;
+  ui.preview.height = height;
+  const ctx = ui.preview.getContext('2d');
+  ctx.fillStyle = 'white';
+  ctx.fillRect(0, 0, width, height);
+  ctx.strokeStyle = '#d6d9d5';
+  ctx.lineWidth = 1;
+  const grid = Math.max(25, Math.round(width / 10));
+  for (let x = grid; x < width; x += grid) {
+    ctx.beginPath(); ctx.moveTo(x + .5, 0); ctx.lineTo(x + .5, height); ctx.stroke();
+  }
+  for (let y = grid; y < height; y += grid) {
+    ctx.beginPath(); ctx.moveTo(0, y + .5); ctx.lineTo(width, y + .5); ctx.stroke();
+  }
+  drawLaserTarget(ctx, Math.max(width, height));
+  ui.dimensions.textContent = `${width} × ${height} positioning grid`;
+  ui.preview.style.display = 'block';
+  ui.emptyPreview.style.display = 'none';
+}
+
+function renderPointPreview() {
+  if (packedBitmap && preparedImageData) renderPlacement();
+  else renderPointCanvas();
+}
+
+function renderIdlePreview() {
+  if (packedBitmap && preparedImageData) {
+    renderPlacement();
+  } else if (sourceImage) {
+    rebuildPreview();
+  } else {
+    ui.preview.style.display = 'none';
+    ui.emptyPreview.style.display = 'block';
+    ui.dimensions.textContent = '—';
+  }
+}
+
 function renderPlacement() {
   if (!packedBitmap || !preparedImageData || editorMode === 'crop') return;
   const profile = protocolProfiles[ui.protocol.value];
@@ -523,19 +579,7 @@ function renderPlacement() {
   ctx.fillStyle = 'white'; ctx.fillRect(0, 0, canvasSize, canvasSize);
   ctx.putImageData(preparedImageData, classic ? 0 : artworkLeft, classic ? 0 : artworkTop);
   drawArtworkHandles(ctx);
-  if (laserPoint) {
-    const { x, y } = laserPoint;
-    ctx.save();
-    ctx.strokeStyle = '#e23b32';
-    ctx.fillStyle = 'rgba(255,255,255,.82)';
-    ctx.lineWidth = Math.max(2, canvasSize / 275);
-    ctx.beginPath(); ctx.arc(x + .5, y + .5, 9, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(x - 14, y + .5); ctx.lineTo(x + 15, y + .5);
-    ctx.moveTo(x + .5, y - 14); ctx.lineTo(x + .5, y + 15);
-    ctx.stroke();
-    ctx.restore();
-  }
+  drawLaserTarget(ctx, canvasSize);
   packedBitmap.left = classic ? 0 : artworkLeft;
   packedBitmap.top = classic ? 0 : artworkTop;
   const millimetersPerPixel = 38 / canvasSize;
@@ -607,7 +651,7 @@ function renderCropEditor() {
 }
 
 function setEditorMode(mode) {
-  if (!sourceImage && mode !== 'move') return;
+  if (!sourceImage && mode === 'crop') return;
   editorMode = mode;
   pointerDrag = null;
   if (mode === 'crop') {
@@ -615,8 +659,8 @@ function setEditorMode(mode) {
     renderCropEditor();
   } else {
     cropEditor = null;
-    if (packedBitmap && preparedImageData) renderPlacement();
-    else rebuildPreview();
+    if (mode === 'point') renderPointPreview();
+    else renderIdlePreview();
   }
   updateEditorUI();
   updateButtons();
@@ -636,14 +680,14 @@ function updateEditorUI() {
   ui.preview.classList.toggle('edit-move', editorMode === 'move' && hasImage);
   ui.preview.classList.toggle('edit-crop', editorMode === 'crop');
   ui.preview.classList.toggle('point-mode', editorMode === 'point');
-  if (!hasImage) {
-    ui.editorHelp.textContent = 'Choose an image, then drag it directly in the preview.';
-  } else if (editorMode === 'crop') {
-    ui.editorHelp.textContent = 'Drag the crop edges or corners on the original image; drag inside to move the selection. Apply when ready.';
-  } else if (editorMode === 'point') {
+  if (editorMode === 'point') {
     ui.editorHelp.textContent = laserPoint
       ? `Laser target: ${laserPoint.x}, ${laserPoint.y}. Click elsewhere to move it.`
-      : 'Click the preview to move the idle positioning laser. This tool physically moves the machine.';
+      : 'Click the preview to move the idle positioning laser. Artwork is optional.';
+  } else if (!hasImage) {
+    ui.editorHelp.textContent = 'Choose an image, or use Laser position with the connected machine.';
+  } else if (editorMode === 'crop') {
+    ui.editorHelp.textContent = 'Drag the crop edges or corners on the original image; drag inside to move the selection. Apply when ready.';
   } else {
     ui.editorHelp.textContent = latestStatus.device_running
       ? 'Drag to edit the next job; the current engraving is unchanged. Drag any corner handle to resize.'
@@ -667,13 +711,18 @@ function updateButtons() {
   ui.outline.textContent = outlineActive ? 'Stop outline' : 'Low-power outline';
   ui.outline.disabled = !connected || uploading || busy || cropOpen || !capabilities().outline || (!outlineActive && !packedBitmap);
   ui.stop.disabled = !connected;
-  const pointUnavailable = !connected || Boolean(latestStatus.device_running) || !packedBitmap || !capabilities().point;
+  const pointUnavailable = !connected || Boolean(latestStatus.device_running) || !capabilities().point;
   if (editorMode === 'point' && pointUnavailable) {
     editorMode = 'move';
     updateEditorUI();
-    renderPlacement();
+    renderIdlePreview();
   }
   ui.pointMode.disabled = pointUnavailable || uploading || busy;
+  if (!connected) ui.pointMode.title = 'Connect and verify the engraver first.';
+  else if (!capabilities().point) ui.pointMode.title = 'The detected controller profile does not support absolute laser positioning.';
+  else if (latestStatus.device_running) ui.pointMode.title = 'Stop or pause the current engraving before moving the positioning laser.';
+  else if (uploading || busy) ui.pointMode.title = 'Wait for the current command or upload to finish.';
+  else ui.pointMode.title = 'Click the preview to move the idle positioning laser; artwork is optional.';
   $$('[data-action]').forEach(button => {
     const action = button.dataset.action;
     let allowed = connected && !uploading && !busy;
@@ -921,16 +970,17 @@ ui.pointMode.addEventListener('click', () => {
 ui.preview.addEventListener('click', async event => {
   if (editorMode !== 'point' || actionPending || ui.pointMode.disabled) return;
   const rect = ui.preview.getBoundingClientRect();
-  const maximum = Number(capabilities().max_width);
-  const x = Math.max(0, Math.min(maximum - 1, Math.floor((event.clientX - rect.left) * ui.preview.width / rect.width)));
-  const y = Math.max(0, Math.min(maximum - 1, Math.floor((event.clientY - rect.top) * ui.preview.height / rect.height)));
+  const maximumX = Number(capabilities().max_width);
+  const maximumY = Number(capabilities().max_height || maximumX);
+  const x = Math.max(0, Math.min(maximumX - 1, Math.floor((event.clientX - rect.left) * ui.preview.width / rect.width)));
+  const y = Math.max(0, Math.min(maximumY - 1, Math.floor((event.clientY - rect.top) * ui.preview.height / rect.height)));
   const previous = laserPoint;
   laserPoint = { x, y };
-  renderPlacement();
+  renderPointPreview();
   updateEditorUI();
-  if (!await ensureOutlineStopped() || !await ensurePrepared() || !await sendAction('point', { x, y })) {
+  if (!await ensureOutlineStopped() || !await sendAction('point', { x, y })) {
     laserPoint = previous;
-    renderPlacement();
+    renderPointPreview();
     updateEditorUI();
   }
 });
