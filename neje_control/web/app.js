@@ -236,9 +236,7 @@ function installArtworkSource(image, kind) {
     ui.invert.checked = false;
     updateRenderModeUI();
   }
-  ui.openTextDialog.innerHTML = kind === 'text'
-    ? '<span aria-hidden="true">Aa</span> Edit text artwork'
-    : '<span aria-hidden="true">Aa</span> Create text artwork';
+  ui.openTextDialog.innerHTML = '<span aria-hidden="true">Aa</span> Add text';
   updateTransformState();
   imageRevision += 1;
   resetArtworkGeometry();
@@ -623,7 +621,6 @@ function setEditorMode(mode) {
 function updateEditorUI() {
   const hasImage = Boolean(sourceImage);
   const editingLocked = Boolean(latestStatus.uploading || latestStatus.device_running || actionPending || preparePending);
-  ui.openTextDialog.disabled = editingLocked;
   ui.moveTool.disabled = !hasImage || editingLocked;
   ui.cropTool.disabled = !hasImage || editingLocked;
   for (const control of [ui.rotateLeft, ui.rotateRight, ui.flipHorizontal, ui.flipVertical, ui.lockAspect]) {

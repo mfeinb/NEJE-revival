@@ -127,7 +127,7 @@ deliberately opt-in: expand **Advanced image controls**, then check **Enable
 advanced processing** to use brightness, contrast, gamma, sharpening, or a
 different dither algorithm.
 
-**Create text artwork** opens a focused editor instead of adding permanent
+**Add text** opens a focused editor instead of adding permanent
 controls to the page. It supports multiple lines, live font/style/alignment
 preview, and re-editing after creation. Text becomes the current artwork and is
 then positioned and sized with the same preview handles as an uploaded image.
