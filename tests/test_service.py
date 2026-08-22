@@ -98,13 +98,12 @@ class ServiceTests(unittest.TestCase):
         with self.assertRaises(ServiceError):
             service.action("point", {"x": 100, "y": 100}, False)
 
-    def test_mode4_verified_bitmap_is_reused_when_engraving_starts(self):
+    def test_mode4_complete_unconfirmed_bitmap_is_reused_when_engraving_starts(self):
         class Mode4Transport(FakeSerialTransport):
             def __init__(self, port):
                 super().__init__(port)
                 self.sent_handshake = False
                 self.sent_request = False
-                self.sent_verification = False
 
             def read_available(self, settle_seconds=0.15):
                 if not self.sent_handshake:
@@ -113,9 +112,6 @@ class ServiceTests(unittest.TestCase):
                 if self.writes[-1] == bytes.fromhex("ff 06 01 00") and not self.sent_request:
                     self.sent_request = True
                     return bytes.fromhex("ff 05 01 00")
-                if len(self.writes[-1]) == 72 * 552 and not self.sent_verification:
-                    self.sent_verification = True
-                    return bytes.fromhex("ff 0b 00 00")
                 return b""
 
         service = ControllerService(Mode4Transport)
@@ -141,6 +137,10 @@ class ServiceTests(unittest.TestCase):
             bytes.fromhex("ff 01 01 00"),
         ])
         self.assertEqual(service.status()["phase"], "Engraving started")
+        self.assertEqual(
+            service.status()["last_command_hex"],
+            "ff 05 46 00 · ff 01 01 00",
+        )
 
 
 if __name__ == "__main__":

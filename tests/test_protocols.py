@@ -146,6 +146,33 @@ class ProtocolPacketTests(unittest.TestCase):
         self.assertNotIn(bytes.fromhex("ff 01 01 00"), packets)
         self.assertIn("Image ready for positioning", phases)
 
+    def test_official_v40_accepts_complete_upload_without_optional_confirmation(self):
+        class Mode4NoConfirmationTransport(FakeTransport):
+            def __init__(self):
+                super().__init__()
+                self.replies = [bytes.fromhex("ff 05 01 00"), b""]
+
+            def read_available(self, settle_seconds=0.15):
+                return self.replies.pop(0) if self.replies else b""
+
+        transport = Mode4NoConfirmationTransport()
+        protocol = DK8Official(transport, sleeper=lambda _: None)
+        protocol.machine_mode = 4
+        protocol.work_size = 550
+        protocol.control_style = "direct"
+        phases = []
+        protocol.prepare(
+            MonoBitmap(8, 1, b"\x80"),
+            BurnSettings(burn_time=70, left=0, top=0),
+            cancelled=lambda: False,
+            progress=lambda sent, total, phase: phases.append(phase),
+        )
+        packets = [entry[0] for entry in transport.writes]
+        self.assertEqual(packets[0], bytes.fromhex("ff 06 01 00"))
+        self.assertEqual(len(packets[1]), 72 * 552)
+        self.assertEqual(len(packets), 2)
+        self.assertIn("Image transferred; controller omitted final confirmation", phases)
+
     def test_official_v40_starts_prepared_image_without_uploading_again(self):
         transport = FakeTransport()
         protocol = DK8Official(transport, sleeper=lambda _: None)

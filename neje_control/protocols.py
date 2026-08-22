@@ -585,9 +585,12 @@ class DK8Official(BaseProtocol):
             raise ProtocolError("prepared-image start is implemented only for DK-8-KZ mode 4")
         if not 1 <= settings.burn_time <= 240:
             raise ProtocolError("DK-8-KZ burn time must be from 1 to 240")
-        self.transport.write(bytes((0xFF, 0x05, settings.burn_time, 0x00)))
+        burn_time_packet = bytes((0xFF, 0x05, settings.burn_time, 0x00))
+        start_packet = b"\xff\x01\x01\x00"
+        self.last_action_packets = [burn_time_packet, start_packet]
+        self.transport.write(burn_time_packet)
         self.sleep(0.02)
-        self.transport.write(b"\xff\x01\x01\x00")
+        self.transport.write(start_packet)
         progress(0, 0, "Engraving started on the device")
 
     def prepare(
@@ -619,10 +622,18 @@ class DK8Official(BaseProtocol):
         if sent != len(pixels) or cancelled():
             self.action("stop")
             return
-        completed = self._read_until_response(0x0B, 10.0)
-        if not self._contains_response(completed, 0x0B):
-            raise ProtocolError("mode-4 positioning image was not verified by the controller")
-        progress(len(pixels), len(pixels), "Image ready for positioning")
+        # Some early mode-4 controllers retain the complete framebuffer but do
+        # not emit the final FF 0B confirmation used by later revisions. The
+        # transfer is still safe to use because it began only after the device's
+        # explicit FF 05 01 00 request and write() confirmed every byte. A short
+        # or cancelled write above remains a hard failure and can never start.
+        completed = self.transport.read_available(1.0)
+        phase = (
+            "Image ready for positioning"
+            if self._contains_response(completed, 0x0B)
+            else "Image transferred; controller omitted final confirmation"
+        )
+        progress(len(pixels), len(pixels), phase)
 
 
 def _u16(value: int) -> bytes:

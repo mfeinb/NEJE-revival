@@ -162,6 +162,7 @@ class ControllerService:
         except (KeyError, TypeError, ValueError, ProtocolError) as exc:
             raise ServiceError(str(exc)) from exc
         with self._lock:
+            self._state["error"] = None
             if name == "stop":
                 self._state.update(device_running=False, phase="Stopped")
             elif name == "pause":
@@ -232,7 +233,16 @@ class ControllerService:
                     else:
                         if protocol.info.get("prepare", False):
                             self._prepared_signature = signature
-                        self._state.update(device_running=True, phase="Engraving started", prepared=True)
+                        self._state.update(
+                            device_running=True,
+                            phase="Engraving started",
+                            prepared=True,
+                            error=None,
+                            last_command_reply_hex="",
+                            last_command_hex=" · ".join(
+                                packet.hex(" ") for packet in protocol.last_action_packets
+                            ),
+                        )
             except Exception as exc:
                 with self._lock:
                     self._prepared_signature = None
