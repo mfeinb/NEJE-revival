@@ -4,10 +4,9 @@ A local, cross-platform controller for discontinued **NEJE DK-8-KZ** laser
 engravers. It replaces the unsupported vendor GUI with a small Python service
 and a browser interface that runs entirely on your computer.
 
-> **Current status:** connection, mode-4 detection, direct movement, and outline
-> are verified on the owner's DK-8-KZ. The official mode-4 bitmap upload is
-> implemented from NEJE v4.0's exact command path; its first live engraving is
-> the remaining hardware validation step.
+> **Current status:** connection, mode-4 detection, movement, click-to-position,
+> outline, retained-image upload, pause/resume, and engraving are verified on
+> the owner's DK-8-KZ.
 
 ## What it supports
 
@@ -15,8 +14,12 @@ and a browser interface that runs entirely on your computer.
 - Auto-detection across the official DK-8-KZ v4.0/v4.2 profiles, plus four
   alternative community-documented protocols
 - PNG, JPEG, WebP, and BMP input (decoded locally by the browser)
-- Aspect-preserving resize, movable X/Y artwork placement, threshold or
-  Floyd-Steinberg grayscale dithering, and invert
+- Crop, 90° rotation, horizontal/vertical flip, independent width/height, and
+  optional aspect-ratio locking
+- Threshold conversion plus Floyd–Steinberg, Atkinson, or ordered 4×4 dithering
+- Opt-in advanced brightness, contrast, gamma, and sharpening controls
+- Conservative starting presets for kraft paper/cardstock, gray cardboard,
+  untreated light wood, bamboo, and vegetable-tanned leather
 - Home, center, jog, low-power outline, pause/resume where the selected firmware supports it
 - Upload progress, cancellation, reset/stop, and explicit laser-safety interlocks
 - Official four-pixel artwork positioning controls and a low-power outline trace
@@ -38,6 +41,12 @@ python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements.txt
 .venv/bin/python -m neje_control.server
 ```
+
+On macOS, you can instead double-click **Launch NEJE Revival.command**. The
+launcher creates `.venv` and installs the serial dependency on its first run,
+then opens the interface. Keep its Terminal window open while using the
+engraver. macOS may require right-clicking the launcher and choosing **Open**
+the first time because a GitHub checkout is not Apple-notarized.
 
 ### Windows PowerShell
 
@@ -99,8 +108,30 @@ Protocol choice guide:
 
 Mode 4 uploads NEJE v4.0's fixed 39,744-byte framebuffer at 57,600 baud. Newer
 official modes negotiate at 115,200 baud. Both paths wait for the controller's
-data request and verification acknowledgement before sending the engraving-start
-command.
+data request before transfer. Some early mode-4 boards omit the final
+verification frame; after a complete requested 39,744-byte write, the app
+safely treats the retained image as ready. A partial or cancelled transfer can
+never start engraving.
+
+## Image controls and material presets
+
+Transform and crop controls are always available. Width and height remain
+linked until **Lock image aspect ratio** is turned off. Advanced processing is
+deliberately opt-in: expand **Advanced image controls**, then check **Enable
+advanced processing** to use brightness, contrast, gamma, sharpening, or a
+different dither algorithm.
+
+Material presets are conservative starting points, not guaranteed recipes.
+Focus, material color and density, coatings, laser-module age, and ventilation
+all affect the result. Start on scrap, stay with the machine, and increase burn
+time gradually. The verified mode-4 controller exposes burn time but not
+independent PWM strength; NEJE's original application also hid its laser-power
+panel for modes 1–4. Protocols that genuinely advertise power control receive
+the preset's low power value as well.
+
+The included presets intentionally exclude PVC/vinyl, unknown plastics,
+unknown coatings, chrome-tanned leather, reflective materials, and flame-
+retardant stock. Do not assume an unlabeled material is laser-safe.
 
 ## What to report after the first test
 
@@ -124,7 +155,12 @@ python3 -m unittest discover -s tests -v
 ```
 
 The tests verify bitmap validation, classic BMP construction, KZ serpentine row
-encoding, command packets, centering, job order, and the server-side safety gate.
+encoding, command packets, centering, job order, the server-side safety gate,
+and browser image-processing algorithms. Run the JavaScript checks with:
+
+```sh
+node tests/test_image_processing.js
+```
 
 ## Research basis
 
@@ -142,6 +178,12 @@ encoding, command packets, centering, job order, and the server-side safety gate
   implementation worked on those machines.
 - [NEJE's model tutorial](https://neje.club/tutorials/en_kz.htm) documents the
   two-cable power/data arrangement and physical setup.
+- [NEJE's material tutorial](https://neje.club/tutorials/en_bl.htm) identifies
+  wood, gray cardboard, bamboo, and leather as suitable opaque organic test
+  materials, and warns against unsuitable reflective or transparent stock.
+- [NEJE's material-safety guidance](https://neje.shop/blogs/laser-engraver/how-to-safely-process-materials-with-your-diode-laser-engraver)
+  emphasizes ventilation, continuous supervision, and avoiding PVC and unknown
+  plastics.
 
 No firmware is flashed and no controller-board modification is required. A GRBL
 electronics conversion remains a fallback only if the original board is faulty.

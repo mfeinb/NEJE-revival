@@ -8,6 +8,17 @@ const ui = {
   imageFile: $('#imageFile'), renderMode: $('#renderMode'), renderModeHelp: $('#renderModeHelp'),
   toneLabel: $('#toneLabel'), threshold: $('#threshold'), thresholdValue: $('#thresholdValue'),
   invert: $('#invert'), imageInfo: $('#imageInfo'), preview: $('#previewCanvas'),
+  rotateLeft: $('#rotateLeft'), rotateRight: $('#rotateRight'),
+  flipHorizontal: $('#flipHorizontal'), flipVertical: $('#flipVertical'),
+  transformState: $('#transformState'), resetCrop: $('#resetCrop'),
+  cropLeft: $('#cropLeft'), cropRight: $('#cropRight'), cropTop: $('#cropTop'), cropBottom: $('#cropBottom'),
+  lockAspect: $('#lockAspect'), artworkHeight: $('#artworkHeight'),
+  artworkHeightNumber: $('#artworkHeightNumber'), artworkHeightValue: $('#artworkHeightValue'),
+  advancedEnabled: $('#advancedEnabled'), advancedControls: $('#advancedControls'),
+  brightness: $('#brightness'), brightnessValue: $('#brightnessValue'),
+  contrast: $('#contrast'), contrastValue: $('#contrastValue'),
+  gamma: $('#gamma'), gammaValue: $('#gammaValue'), sharpen: $('#sharpen'), sharpenValue: $('#sharpenValue'),
+  ditherAlgorithm: $('#ditherAlgorithm'), resetAdvanced: $('#resetAdvanced'),
   emptyPreview: $('#emptyPreview'), dimensions: $('#dimensions'), burnTime: $('#burnTime'),
   pointMode: $('#pointMode'), pointHelp: $('#pointHelp'),
   artworkWidth: $('#artworkWidth'), artworkWidthNumber: $('#artworkWidthNumber'),
@@ -18,6 +29,7 @@ const ui = {
   positionYValue: $('#positionYValue'), placementHelp: $('#placementHelp'),
   controlHeading: $('#controlHeading'),
   controlHint: $('#controlHint'),
+  materialPreset: $('#materialPreset'), presetHelp: $('#presetHelp'),
   burnTimeValue: $('#burnTimeValue'), power: $('#power'), powerValue: $('#powerValue'),
   powerControls: $('#powerControls'), safety: $('#safetyAck'), outline: $('#outline'),
   start: $('#start'), stop: $('#stop'), phase: $('#phase'), error: $('#error'),
@@ -57,7 +69,19 @@ let laserPoint = null;
 let outlineActive = false;
 let outlineStateKnown = false;
 let errorVisibleUntil = 0;
+let rotation = 0;
+let flipX = false;
+let flipY = false;
+let applyingPreset = false;
 const ERROR_DISPLAY_MS = 20000;
+
+const materialPresets = {
+  paper: { burnTime: 6, power: 15 },
+  'gray-cardboard': { burnTime: 10, power: 20 },
+  basswood: { burnTime: 15, power: 30 },
+  bamboo: { burnTime: 20, power: 35 },
+  'vegetable-leather': { burnTime: 12, power: 25 },
+};
 
 async function api(path, options = {}) {
   const response = await fetch(path, {
@@ -125,6 +149,7 @@ function updateProtocolUI() {
   ui.burnTime.max = String(burnMax);
   if (Number(ui.burnTime.value) > burnMax) ui.burnTime.value = ui.protocol.value === 'extended-kz' ? '20' : '70';
   ui.burnTimeValue.textContent = ui.protocol.value === 'extended-kz' ? `${ui.burnTime.value} ms` : ui.burnTime.value;
+  if (ui.materialPreset.value !== 'custom') setMaterialPreset(ui.materialPreset.value);
   rebuildPreview();
 }
 
@@ -137,6 +162,96 @@ function updateRenderModeUI() {
   ui.renderModeHelp.textContent = dither
     ? 'Simulates grayscale with dot density. Best for photographs; the laser itself remains on/off.'
     : 'Crisp black-or-white conversion controlled by the threshold. Best for text and line art.';
+  ui.ditherAlgorithm.disabled = !ui.advancedEnabled.checked || !dither;
+}
+
+function updateAdvancedUI() {
+  const enabled = ui.advancedEnabled.checked;
+  ui.advancedControls.classList.toggle('disabled', !enabled);
+  for (const control of [ui.brightness, ui.contrast, ui.gamma, ui.sharpen, ui.ditherAlgorithm, ui.resetAdvanced]) {
+    control.disabled = !enabled;
+  }
+  updateRenderModeUI();
+}
+
+function updateAdvancedValues() {
+  ui.brightnessValue.textContent = Number(ui.brightness.value) > 0 ? `+${ui.brightness.value}` : ui.brightness.value;
+  ui.contrastValue.textContent = Number(ui.contrast.value) > 0 ? `+${ui.contrast.value}` : ui.contrast.value;
+  ui.gammaValue.textContent = Number(ui.gamma.value).toFixed(1);
+  ui.sharpenValue.textContent = `${ui.sharpen.value}%`;
+}
+
+function advancedOptions() {
+  if (!ui.advancedEnabled.checked) {
+    return { brightness: 0, contrast: 0, gamma: 1, sharpen: 0, dither: 'floyd-steinberg' };
+  }
+  return {
+    brightness: Number(ui.brightness.value),
+    contrast: Number(ui.contrast.value),
+    gamma: Number(ui.gamma.value),
+    sharpen: Number(ui.sharpen.value),
+    dither: ui.ditherAlgorithm.value,
+  };
+}
+
+function updateTransformState() {
+  const parts = [];
+  if (rotation) parts.push(`${rotation}° rotation`);
+  if (flipX) parts.push('horizontal flip');
+  if (flipY) parts.push('vertical flip');
+  ui.transformState.textContent = parts.length ? parts.join(' · ') : 'No rotation or flip';
+}
+
+function cropValue(control) {
+  const value = Math.round(Number(control.value));
+  control.value = String(Math.max(0, Math.min(45, Number.isFinite(value) ? value : 0)));
+  return Number(control.value);
+}
+
+function transformedSourceCanvas() {
+  const geometry = NEJEImage.transformGeometry(sourceImage.naturalWidth, sourceImage.naturalHeight, {
+    left: cropValue(ui.cropLeft), right: cropValue(ui.cropRight),
+    top: cropValue(ui.cropTop), bottom: cropValue(ui.cropBottom),
+  }, rotation);
+  const { sx, sy, cropWidth, cropHeight } = geometry;
+  const cropped = document.createElement('canvas');
+  cropped.width = cropWidth;
+  cropped.height = cropHeight;
+  cropped.getContext('2d').drawImage(sourceImage, sx, sy, cropWidth, cropHeight, 0, 0, cropWidth, cropHeight);
+
+  const result = document.createElement('canvas');
+  result.width = geometry.width;
+  result.height = geometry.height;
+  const ctx = result.getContext('2d');
+  ctx.translate(result.width / 2, result.height / 2);
+  ctx.rotate(geometry.rotation * Math.PI / 180);
+  ctx.scale(flipX ? -1 : 1, flipY ? -1 : 1);
+  ctx.drawImage(cropped, -cropWidth / 2, -cropHeight / 2);
+  return result;
+}
+
+function setMaterialPreset(name) {
+  const preset = materialPresets[name];
+  if (!preset) {
+    ui.presetHelp.innerHTML = '<strong>Starting points only:</strong> test on scrap at the lowest setting. Focus, color, coatings, density, and laser age change the result. Never use PVC/vinyl, unknown plastics or coatings, or chrome-tanned leather.';
+    return;
+  }
+  applyingPreset = true;
+  ui.burnTime.value = String(Math.min(Number(ui.burnTime.max), preset.burnTime));
+  ui.power.value = String(preset.power);
+  ui.burnTimeValue.textContent = ui.protocol.value === 'extended-kz' ? `${ui.burnTime.value} ms` : ui.burnTime.value;
+  ui.powerValue.textContent = `${ui.power.value}%`;
+  applyingPreset = false;
+  const strengthNote = capabilities().power
+    ? ` Power is set to a conservative ${preset.power}% starting point.`
+    : ' This mode-4 controller has no independent laser-strength command; only burn time is changed.';
+  ui.presetHelp.innerHTML = `<strong>Starting point applied:</strong>${strengthNote} Test on scrap and remain with the machine. Never use PVC/vinyl, unknown plastics or coatings, or chrome-tanned leather.`;
+}
+
+function markMaterialCustom() {
+  if (applyingPreset) return;
+  ui.materialPreset.value = 'custom';
+  setMaterialPreset('custom');
 }
 
 function syncNumberInput(range, number) {
@@ -171,50 +286,6 @@ function bytesToBase64(bytes) {
   return btoa(binary);
 }
 
-function buildBurnMask(image, width, height, mode, threshold, inverted) {
-  const count = width * height;
-  const burnMask = new Uint8Array(count);
-  const tones = mode === 'dither' ? new Float32Array(count) : null;
-
-  for (let pixel = 0; pixel < count; pixel++) {
-    const offset = pixel * 4;
-    const alpha = image.data[offset + 3] / 255;
-    const luma = (0.2126 * image.data[offset] + 0.7152 * image.data[offset + 1] + 0.0722 * image.data[offset + 2]) * alpha + 255 * (1 - alpha);
-    if (mode === 'dither') {
-      const darkness = inverted ? luma : 255 - luma;
-      tones[pixel] = Math.max(0, Math.min(255, darkness + threshold - 128));
-    } else {
-      burnMask[pixel] = Number(inverted ? luma > threshold : luma < threshold);
-    }
-  }
-
-  if (mode !== 'dither') return burnMask;
-
-  // Serpentine Floyd-Steinberg diffusion avoids a directional stripe bias.
-  const addError = (x, y, error, weight) => {
-    if (x >= 0 && x < width && y >= 0 && y < height) {
-      const index = y * width + x;
-      tones[index] = Math.max(0, Math.min(255, tones[index] + error * weight / 16));
-    }
-  };
-  for (let y = 0; y < height; y++) {
-    const forward = y % 2 === 0;
-    for (let step = 0; step < width; step++) {
-      const x = forward ? step : width - 1 - step;
-      const index = y * width + x;
-      const output = tones[index] >= 128 ? 255 : 0;
-      burnMask[index] = Number(output === 255);
-      const error = tones[index] - output;
-      const direction = forward ? 1 : -1;
-      addError(x + direction, y, error, 7);
-      addError(x - direction, y + 1, error, 3);
-      addError(x, y + 1, error, 5);
-      addError(x + direction, y + 1, error, 1);
-    }
-  }
-  return burnMask;
-}
-
 function rebuildPreview() {
   if (!sourceImage) return;
   // Invalidate data from the previous protocol or image immediately. Without
@@ -229,18 +300,29 @@ function rebuildPreview() {
     const profile = protocolProfiles[ui.protocol.value];
     const classic = ui.protocol.value.startsWith('classic-');
     const max = profile.max_width;
-    const [fittedWidth] = fitDimensions(sourceImage.naturalWidth, sourceImage.naturalHeight, max, max);
+    const transformed = transformedSourceCanvas();
+    const [fittedWidth, fittedHeight] = fitDimensions(transformed.width, transformed.height, max, max);
     const nextSizeKey = `${ui.protocol.value}:${max}:${imageRevision}`;
-    ui.artworkWidth.max = String(fittedWidth);
+    const locked = ui.lockAspect.checked;
+    ui.artworkWidth.max = String(locked ? fittedWidth : max);
+    ui.artworkHeight.max = String(locked ? fittedHeight : max);
     ui.artworkWidth.disabled = false;
-    if (sizeKey !== nextSizeKey || Number(ui.artworkWidth.value) > fittedWidth) {
+    ui.artworkHeight.disabled = locked;
+    if (sizeKey !== nextSizeKey) {
       ui.artworkWidth.value = String(fittedWidth);
+      ui.artworkHeight.value = String(fittedHeight);
       sizeKey = nextSizeKey;
     }
+    const contentWidth = Math.max(1, Math.min(Number(ui.artworkWidth.max), Number(ui.artworkWidth.value)));
+    const contentHeight = locked
+      ? Math.max(1, Math.round(transformed.height * contentWidth / transformed.width))
+      : Math.max(1, Math.min(max, Number(ui.artworkHeight.value)));
+    ui.artworkWidth.value = String(contentWidth);
+    ui.artworkHeight.value = String(contentHeight);
     syncNumberInput(ui.artworkWidth, ui.artworkWidthNumber);
-    const contentWidth = Math.max(1, Math.min(fittedWidth, Number(ui.artworkWidth.value)));
-    const contentHeight = Math.max(1, Math.round(sourceImage.naturalHeight * contentWidth / sourceImage.naturalWidth));
+    syncNumberInput(ui.artworkHeight, ui.artworkHeightNumber);
     ui.artworkWidthValue.textContent = `${contentWidth} px · ${(contentWidth * 38 / max).toFixed(1)} mm`;
+    ui.artworkHeightValue.textContent = `${contentHeight} px · ${(contentHeight * 38 / max).toFixed(1)} mm`;
     const width = classic ? 512 : contentWidth;
     const height = classic ? 512 : contentHeight;
     const work = document.createElement('canvas');
@@ -249,13 +331,16 @@ function rebuildPreview() {
     ctx.fillStyle = 'white'; ctx.fillRect(0, 0, width, height);
     const x = classic ? Math.floor((width - contentWidth) / 2) : 0;
     const y = classic ? Math.floor((height - contentHeight) / 2) : 0;
-    ctx.drawImage(sourceImage, x, y, contentWidth, contentHeight);
+    ctx.drawImage(transformed, x, y, contentWidth, contentHeight);
     const image = ctx.getImageData(0, 0, width, height);
     const rowBytes = Math.ceil(width / 8);
     const packed = new Uint8Array(rowBytes * height);
-    const threshold = Number(ui.threshold.value);
-    const inverted = ui.invert.checked;
-    const burnMask = buildBurnMask(image, width, height, ui.renderMode.value, threshold, inverted);
+    const burnMask = NEJEImage.buildBurnMask(image, width, height, {
+      mode: ui.renderMode.value,
+      threshold: Number(ui.threshold.value),
+      inverted: ui.invert.checked,
+      ...advancedOptions(),
+    });
     for (let pixel = 0; pixel < width * height; pixel++) {
       const offset = pixel * 4;
       const burn = Boolean(burnMask[pixel]);
@@ -275,13 +360,16 @@ function rebuildPreview() {
         packed[(row + 1) * rowBytes - 1] &= usedBitsMask;
       }
     }
-    const millimetersPerPixel = 38 / max;
-    const conversion = ui.renderMode.value === 'dither' ? 'Grayscale dither' : 'Threshold';
+    const ditherName = ui.advancedEnabled.checked
+      ? ui.ditherAlgorithm.options[ui.ditherAlgorithm.selectedIndex].text.split(' · ')[0]
+      : 'Floyd–Steinberg';
+    const conversion = ui.renderMode.value === 'dither' ? `${ditherName} dither` : 'Threshold';
+    const sizing = locked ? 'Aspect ratio locked.' : 'Custom width and height applied.';
     ui.imageInfo.textContent = classic
-      ? `${conversion} applied. Centered in the classic firmware's required 512 × 512 frame.`
+      ? `${conversion} applied. ${sizing} Centered in the classic firmware's required 512 × 512 frame.`
       : (profile.placement
-        ? `${conversion} applied. X/Y place it inside the ${max} × ${max} work area.`
-        : `${conversion} applied. Scaled without distortion inside the ${max} × ${max} work area.`);
+        ? `${conversion} applied. ${sizing} X/Y place it inside the ${max} × ${max} work area.`
+        : `${conversion} applied. ${sizing} Positioned inside the ${max} × ${max} work area.`);
     packedBitmap = { width, height, pixels: bytesToBase64(packed) };
     preparedImageData = image;
     if (!classic) {
@@ -493,6 +581,11 @@ ui.imageFile.addEventListener('change', () => {
   const image = new Image();
   image.onload = () => {
     sourceImage = image;
+    rotation = 0;
+    flipX = false;
+    flipY = false;
+    for (const control of [ui.cropLeft, ui.cropRight, ui.cropTop, ui.cropBottom]) control.value = '0';
+    updateTransformState();
     imageRevision += 1;
     sizeKey = '';
     placementKey = '';
@@ -507,13 +600,57 @@ ui.threshold.addEventListener('input', () => { updateRenderModeUI(); rebuildPrev
 ui.invert.addEventListener('change', rebuildPreview);
 ui.artworkWidth.addEventListener('input', () => { ui.artworkWidthNumber.value = ui.artworkWidth.value; rebuildPreview(); });
 ui.artworkWidthNumber.addEventListener('change', () => applyNumberInput(ui.artworkWidth, ui.artworkWidthNumber, rebuildPreview));
+ui.artworkHeight.addEventListener('input', () => { ui.artworkHeightNumber.value = ui.artworkHeight.value; rebuildPreview(); });
+ui.artworkHeightNumber.addEventListener('change', () => applyNumberInput(ui.artworkHeight, ui.artworkHeightNumber, rebuildPreview));
+ui.lockAspect.addEventListener('change', rebuildPreview);
+ui.rotateLeft.addEventListener('click', () => {
+  rotation = (rotation + 270) % 360;
+  imageRevision += 1; sizeKey = ''; placementKey = '';
+  updateTransformState(); rebuildPreview();
+});
+ui.rotateRight.addEventListener('click', () => {
+  rotation = (rotation + 90) % 360;
+  imageRevision += 1; sizeKey = ''; placementKey = '';
+  updateTransformState(); rebuildPreview();
+});
+ui.flipHorizontal.addEventListener('click', () => {
+  flipX = !flipX; imageRevision += 1;
+  updateTransformState(); rebuildPreview();
+});
+ui.flipVertical.addEventListener('click', () => {
+  flipY = !flipY; imageRevision += 1;
+  updateTransformState(); rebuildPreview();
+});
+for (const cropControl of [ui.cropLeft, ui.cropRight, ui.cropTop, ui.cropBottom]) {
+  cropControl.addEventListener('change', () => {
+    cropValue(cropControl); imageRevision += 1; sizeKey = ''; placementKey = ''; rebuildPreview();
+  });
+}
+ui.resetCrop.addEventListener('click', () => {
+  for (const control of [ui.cropLeft, ui.cropRight, ui.cropTop, ui.cropBottom]) control.value = '0';
+  imageRevision += 1; sizeKey = ''; placementKey = ''; rebuildPreview();
+});
+ui.advancedEnabled.addEventListener('change', () => { updateAdvancedUI(); rebuildPreview(); });
+for (const control of [ui.brightness, ui.contrast, ui.gamma, ui.sharpen]) {
+  control.addEventListener('input', () => { updateAdvancedValues(); rebuildPreview(); });
+}
+ui.ditherAlgorithm.addEventListener('change', rebuildPreview);
+ui.resetAdvanced.addEventListener('click', () => {
+  ui.brightness.value = '0'; ui.contrast.value = '0'; ui.gamma.value = '1'; ui.sharpen.value = '0';
+  ui.ditherAlgorithm.value = 'floyd-steinberg';
+  updateAdvancedValues(); rebuildPreview();
+});
 ui.positionX.addEventListener('input', () => { ui.positionXNumber.value = ui.positionX.value; renderPlacement(); });
 ui.positionXNumber.addEventListener('change', () => applyNumberInput(ui.positionX, ui.positionXNumber, renderPlacement));
 ui.positionY.addEventListener('input', () => { ui.positionYNumber.value = ui.positionY.value; renderPlacement(); });
 ui.positionYNumber.addEventListener('change', () => applyNumberInput(ui.positionY, ui.positionYNumber, renderPlacement));
 ui.protocol.addEventListener('change', updateProtocolUI);
-ui.burnTime.addEventListener('input', () => { ui.burnTimeValue.textContent = ui.protocol.value === 'extended-kz' ? `${ui.burnTime.value} ms` : ui.burnTime.value; });
-ui.power.addEventListener('input', () => { ui.powerValue.textContent = `${ui.power.value}%`; });
+ui.materialPreset.addEventListener('change', () => setMaterialPreset(ui.materialPreset.value));
+ui.burnTime.addEventListener('input', () => {
+  ui.burnTimeValue.textContent = ui.protocol.value === 'extended-kz' ? `${ui.burnTime.value} ms` : ui.burnTime.value;
+  markMaterialCustom();
+});
+ui.power.addEventListener('input', () => { ui.powerValue.textContent = `${ui.power.value}%`; markMaterialCustom(); });
 $('#refreshPorts').addEventListener('click', refreshPorts);
 ui.connect.addEventListener('click', connect);
 ui.disconnect.addEventListener('click', async () => {
@@ -600,6 +737,19 @@ function currentPreparationKey() {
     ui.renderMode.value,
     ui.threshold.value,
     Number(ui.invert.checked),
+    Number(ui.advancedEnabled.checked),
+    ui.brightness.value,
+    ui.contrast.value,
+    ui.gamma.value,
+    ui.sharpen.value,
+    ui.ditherAlgorithm.value,
+    rotation,
+    Number(flipX),
+    Number(flipY),
+    ui.cropLeft.value,
+    ui.cropRight.value,
+    ui.cropTop.value,
+    ui.cropBottom.value,
     packedBitmap.width,
     packedBitmap.height,
     packedBitmap.left,
@@ -682,6 +832,9 @@ async function poll() {
 }
 
 updateRenderModeUI();
+updateAdvancedValues();
+updateAdvancedUI();
+updateTransformState();
 updateProtocolUI();
 updatePointModeUI();
 refreshPorts().then(poll);

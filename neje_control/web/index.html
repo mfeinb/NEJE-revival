@@ -6,7 +6,7 @@
   <meta name="color-scheme" content="dark">
   <link rel="icon" href="data:,">
   <title>NEJE Revival</title>
-  <link rel="stylesheet" href="/styles.css?v=20260821.7">
+  <link rel="stylesheet" href="/styles.css?v=20260822.1">
 </head>
 <body>
   <header>
@@ -63,11 +63,59 @@
         <input id="threshold" type="range" min="0" max="255" value="128">
         <label class="check"><input id="invert" type="checkbox"> Invert light and dark</label>
 
+        <div class="image-tools">
+          <span class="field-label">Transform</span>
+          <div class="button-grid compact">
+            <button id="rotateLeft" class="secondary" type="button">↶ Rotate</button>
+            <button id="rotateRight" class="secondary" type="button">Rotate ↷</button>
+            <button id="flipHorizontal" class="secondary" type="button">↔ Flip</button>
+            <button id="flipVertical" class="secondary" type="button">↕ Flip</button>
+          </div>
+          <span id="transformState" class="hint">No rotation or flip</span>
+
+          <span class="field-label">Crop edges (%)</span>
+          <div class="crop-grid">
+            <label>Left <input id="cropLeft" type="number" min="0" max="45" value="0"></label>
+            <label>Right <input id="cropRight" type="number" min="0" max="45" value="0"></label>
+            <label>Top <input id="cropTop" type="number" min="0" max="45" value="0"></label>
+            <label>Bottom <input id="cropBottom" type="number" min="0" max="45" value="0"></label>
+          </div>
+          <button id="resetCrop" class="secondary subtle" type="button">Reset crop</button>
+        </div>
+
         <label for="artworkWidth">Artwork width <output id="artworkWidthValue">—</output></label>
         <div class="range-with-number">
           <input id="artworkWidth" type="range" min="1" max="550" value="550" disabled>
           <input id="artworkWidthNumber" type="number" min="1" max="550" value="550" aria-label="Artwork width in pixels" disabled>
         </div>
+        <label class="check"><input id="lockAspect" type="checkbox" checked> Lock image aspect ratio</label>
+        <label for="artworkHeight">Artwork height <output id="artworkHeightValue">—</output></label>
+        <div class="range-with-number">
+          <input id="artworkHeight" type="range" min="1" max="550" value="550" disabled>
+          <input id="artworkHeightNumber" type="number" min="1" max="550" value="550" aria-label="Artwork height in pixels" disabled>
+        </div>
+
+        <details id="advancedPanel" class="advanced-panel">
+          <summary>Advanced image controls</summary>
+          <label class="check advanced-enable"><input id="advancedEnabled" type="checkbox"> Enable advanced processing</label>
+          <div id="advancedControls">
+            <label for="brightness">Brightness <output id="brightnessValue">0</output></label>
+            <input id="brightness" type="range" min="-100" max="100" value="0">
+            <label for="contrast">Contrast <output id="contrastValue">0</output></label>
+            <input id="contrast" type="range" min="-100" max="100" value="0">
+            <label for="gamma">Gamma <output id="gammaValue">1.0</output></label>
+            <input id="gamma" type="range" min="0.2" max="3" step="0.1" value="1">
+            <label for="sharpen">Sharpen <output id="sharpenValue">0%</output></label>
+            <input id="sharpen" type="range" min="0" max="100" value="0">
+            <label for="ditherAlgorithm">Dither algorithm</label>
+            <select id="ditherAlgorithm">
+              <option value="floyd-steinberg">Floyd–Steinberg · smooth</option>
+              <option value="atkinson">Atkinson · lighter detail</option>
+              <option value="ordered">Ordered 4×4 · regular texture</option>
+            </select>
+            <button id="resetAdvanced" class="secondary subtle" type="button">Reset advanced controls</button>
+          </div>
+        </details>
         <div id="placementControls">
           <label for="positionX">Artwork X <output id="positionXValue">0</output></label>
           <div class="range-with-number">
@@ -86,6 +134,16 @@
 
       <section class="panel">
         <h2>3 · Engrave</h2>
+        <label for="materialPreset">Material starting point</label>
+        <select id="materialPreset">
+          <option value="custom">Custom</option>
+          <option value="paper">Kraft paper / cardstock · very light</option>
+          <option value="gray-cardboard">Gray cardboard · light</option>
+          <option value="basswood">Untreated light wood / basswood</option>
+          <option value="bamboo">Untreated bamboo</option>
+          <option value="vegetable-leather">Vegetable-tanned leather</option>
+        </select>
+        <p id="presetHelp" class="power-warning"><strong>Starting points only:</strong> test on scrap at the lowest setting. Focus, color, coatings, density, and laser age change the result. Never use PVC/vinyl, unknown plastics, unknown coatings, or chrome-tanned leather.</p>
         <label for="burnTime">Burn time <output id="burnTimeValue">20</output></label>
         <input id="burnTime" type="range" min="1" max="100" value="20">
         <div id="powerControls">
@@ -160,6 +218,7 @@
   </main>
 
   <footer>Runs only on this computer at localhost. No image or device data leaves the machine.</footer>
-  <script src="/app.js?v=20260821.8"></script>
+  <script src="/image_processing.js?v=20260822.1"></script>
+  <script src="/app.js?v=20260822.1"></script>
 </body>
 </html>

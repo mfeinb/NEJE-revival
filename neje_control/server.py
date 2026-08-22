@@ -22,7 +22,7 @@ MAX_REQUEST_BYTES = 2 * 1024 * 1024
 
 class AppHandler(SimpleHTTPRequestHandler):
     service: ControllerService
-    server_version = "NEJE-Revival/0.1"
+    server_version = "NEJE-Revival/0.2"
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(WEB_ROOT), **kwargs)
