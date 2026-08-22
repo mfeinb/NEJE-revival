@@ -14,6 +14,8 @@ and a browser interface that runs entirely on your computer.
 - Auto-detection across the official DK-8-KZ v4.0/v4.2 profiles, plus four
   alternative community-documented protocols
 - PNG, JPEG, WebP, and BMP input (decoded locally by the browser)
+- Multiline text artwork with live preview, five font families, alignment,
+  bold, and italic styles
 - Mouse-driven crop, placement, and corner-handle resizing directly on the
   preview, plus 90° rotation, flips, and optional aspect-ratio locking
 - Threshold conversion plus Floyd–Steinberg, Atkinson, or ordered 4×4 dithering
@@ -124,6 +126,11 @@ Outline, and Upload & engrave communicate with the device. Advanced processing i
 deliberately opt-in: expand **Advanced image controls**, then check **Enable
 advanced processing** to use brightness, contrast, gamma, sharpening, or a
 different dither algorithm.
+
+**Create text artwork** opens a focused editor instead of adding permanent
+controls to the page. It supports multiple lines, live font/style/alignment
+preview, and re-editing after creation. Text becomes the current artwork and is
+then positioned and sized with the same preview handles as an uploaded image.
 
 Material presets are conservative starting points, not guaranteed recipes.
 Focus, material color and density, coatings, laser-module age, and ventilation

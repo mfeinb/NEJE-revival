@@ -6,6 +6,11 @@ const ui = {
   detectedProtocol: $('#detectedProtocol'),
   connect: $('#connect'), disconnect: $('#disconnect'), badge: $('#connectionBadge'),
   imageFile: $('#imageFile'), renderMode: $('#renderMode'), renderModeHelp: $('#renderModeHelp'),
+  openTextDialog: $('#openTextDialog'), textDialog: $('#textDialog'), closeTextDialog: $('#closeTextDialog'),
+  textContent: $('#textContent'), textFont: $('#textFont'), textAlign: $('#textAlign'),
+  textBold: $('#textBold'), textItalic: $('#textItalic'), textPreview: $('#textPreview'),
+  emptyTextPreview: $('#emptyTextPreview'), textReplaceNote: $('#textReplaceNote'),
+  textDialogError: $('#textDialogError'), cancelText: $('#cancelText'), createText: $('#createText'),
   toneLabel: $('#toneLabel'), threshold: $('#threshold'), thresholdValue: $('#thresholdValue'),
   invert: $('#invert'), imageInfo: $('#imageInfo'), preview: $('#previewCanvas'),
   rotateLeft: $('#rotateLeft'), rotateRight: $('#rotateRight'),
@@ -46,6 +51,7 @@ const protocolProfiles = {
 };
 
 let sourceImage = null;
+let sourceKind = null;
 let packedBitmap = null;
 let preparedImageData = null;
 let latestStatus = { connected: false };
@@ -73,6 +79,14 @@ let artworkHeight = null;
 let artworkLeft = null;
 let artworkTop = null;
 let applyingPreset = false;
+let textPreviewToken = 0;
+let textSettings = {
+  content: '',
+  font: 'Arial, Helvetica, sans-serif',
+  align: 'center',
+  bold: false,
+  italic: false,
+};
 const ERROR_DISPLAY_MS = 20000;
 
 const materialPresets = {
@@ -208,6 +222,142 @@ function transformedSourceCanvas(edges = cropEdges) {
   return result;
 }
 
+function installArtworkSource(image, kind) {
+  sourceImage = image;
+  sourceKind = kind;
+  rotation = 0;
+  flipX = false;
+  flipY = false;
+  cropEdges = { left: 0, right: 0, top: 0, bottom: 0 };
+  cropDraft = null;
+  editorMode = 'move';
+  if (kind === 'text') {
+    ui.renderMode.value = 'threshold';
+    ui.invert.checked = false;
+    updateRenderModeUI();
+  }
+  ui.openTextDialog.innerHTML = kind === 'text'
+    ? '<span aria-hidden="true">Aa</span> Edit text artwork'
+    : '<span aria-hidden="true">Aa</span> Create text artwork';
+  updateTransformState();
+  imageRevision += 1;
+  resetArtworkGeometry();
+  updateEditorUI();
+  rebuildPreview();
+}
+
+function readTextSettings() {
+  return {
+    content: ui.textContent.value.replace(/\r/g, ''),
+    font: ui.textFont.value,
+    align: ui.textAlign.value,
+    bold: ui.textBold.checked,
+    italic: ui.textItalic.checked,
+  };
+}
+
+function textLines(content) {
+  const lines = content.split('\n');
+  while (lines.length && !lines[0].trim()) lines.shift();
+  while (lines.length && !lines[lines.length - 1].trim()) lines.pop();
+  if (!lines.length) throw new Error('Enter some text first.');
+  if (lines.length > 20) throw new Error('Text artwork is limited to 20 lines.');
+  if (lines.some(line => line.length > 180)) throw new Error('A text line is too long. Add a line break to wrap it.');
+  return lines;
+}
+
+function textFont(settings, size) {
+  return `${settings.italic ? 'italic ' : ''}${settings.bold ? '700 ' : '400 '}${size}px ${settings.font}`;
+}
+
+function createTextCanvas(settings, { fontSize = 128, maximum = 4096, padding = 48 } = {}) {
+  const lines = textLines(settings.content);
+  const measure = document.createElement('canvas').getContext('2d');
+  const geometryAt = size => {
+    measure.font = textFont(settings, size);
+    const widths = lines.map(line => measure.measureText(line || ' ').width);
+    return NEJEImage.textBlockGeometry(widths, size, 1.22, padding, settings.align);
+  };
+  let size = fontSize;
+  let geometry = geometryAt(size);
+  if (geometry.width > maximum || geometry.height > maximum) {
+    const scale = Math.min(maximum / geometry.width, maximum / geometry.height);
+    size = Math.max(16, Math.floor(size * scale));
+    geometry = geometryAt(size);
+  }
+  if (geometry.width > maximum || geometry.height > maximum) {
+    throw new Error('This text block is too large. Shorten it or add line breaks.');
+  }
+  const canvas = document.createElement('canvas');
+  canvas.width = geometry.width;
+  canvas.height = geometry.height;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = 'white';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = 'black';
+  ctx.font = textFont(settings, size);
+  ctx.textAlign = geometry.textAlign;
+  ctx.textBaseline = 'top';
+  lines.forEach((line, index) => ctx.fillText(line, geometry.positions[index].x, geometry.positions[index].y));
+  return canvas;
+}
+
+function updateTextPreview() {
+  const token = ++textPreviewToken;
+  requestAnimationFrame(() => {
+    if (token !== textPreviewToken || !ui.textDialog.open) return;
+    ui.textDialogError.textContent = '';
+    try {
+      const preview = createTextCanvas(readTextSettings(), { fontSize: 72, maximum: 1200, padding: 28 });
+      ui.textPreview.width = preview.width;
+      ui.textPreview.height = preview.height;
+      ui.textPreview.getContext('2d').drawImage(preview, 0, 0);
+      ui.textPreview.style.display = 'block';
+      ui.emptyTextPreview.hidden = true;
+      ui.createText.disabled = false;
+    } catch (error) {
+      ui.textPreview.style.display = 'none';
+      ui.emptyTextPreview.hidden = false;
+      ui.textDialogError.textContent = error.message;
+      ui.createText.disabled = true;
+    }
+  });
+}
+
+function openTextEditor() {
+  ui.textContent.value = textSettings.content;
+  ui.textFont.value = textSettings.font;
+  ui.textAlign.value = textSettings.align;
+  ui.textBold.checked = textSettings.bold;
+  ui.textItalic.checked = textSettings.italic;
+  ui.textReplaceNote.hidden = !sourceImage || sourceKind === 'text';
+  ui.textDialogError.textContent = '';
+  ui.textDialog.showModal();
+  updateTextPreview();
+  requestAnimationFrame(() => ui.textContent.focus());
+}
+
+function closeTextEditor() {
+  if (ui.textDialog.open) ui.textDialog.close();
+}
+
+function createTextArtwork() {
+  try {
+    const settings = readTextSettings();
+    const canvas = createTextCanvas(settings);
+    const image = new Image();
+    image.onload = () => {
+      textSettings = settings;
+      installArtworkSource(image, 'text');
+      closeTextEditor();
+    };
+    image.onerror = () => { ui.textDialogError.textContent = 'The browser could not create the text artwork.'; };
+    image.src = canvas.toDataURL('image/png');
+  } catch (error) {
+    ui.textDialogError.textContent = error.message;
+  }
+}
+
 function setMaterialPreset(name) {
   const preset = materialPresets[name];
   if (!preset) {
@@ -327,7 +477,8 @@ function rebuildPreview() {
       ? ui.ditherAlgorithm.options[ui.ditherAlgorithm.selectedIndex].text.split(' · ')[0]
       : 'Floyd–Steinberg';
     const conversion = ui.renderMode.value === 'dither' ? `${ditherName} dither` : 'Threshold';
-    ui.imageInfo.textContent = `${conversion} applied. Move and resize the artwork directly in the preview.`;
+    const sourceLabel = sourceKind === 'text' ? 'Text artwork' : 'Image';
+    ui.imageInfo.textContent = `${sourceLabel} · ${conversion} applied. Move and resize it directly in the preview.`;
     packedBitmap = {
       width,
       height,
@@ -472,6 +623,7 @@ function setEditorMode(mode) {
 function updateEditorUI() {
   const hasImage = Boolean(sourceImage);
   const editingLocked = Boolean(latestStatus.uploading || latestStatus.device_running || actionPending || preparePending);
+  ui.openTextDialog.disabled = editingLocked;
   ui.moveTool.disabled = !hasImage || editingLocked;
   ui.cropTool.disabled = !hasImage || editingLocked;
   for (const control of [ui.rotateLeft, ui.rotateRight, ui.flipHorizontal, ui.flipVertical, ui.lockAspect]) {
@@ -635,22 +787,21 @@ ui.imageFile.addEventListener('change', () => {
   if (!file) return;
   const image = new Image();
   image.onload = () => {
-    sourceImage = image;
-    rotation = 0;
-    flipX = false;
-    flipY = false;
-    cropEdges = { left: 0, right: 0, top: 0, bottom: 0 };
-    cropDraft = null;
-    editorMode = 'move';
-    updateTransformState();
-    imageRevision += 1;
-    resetArtworkGeometry();
-    updateEditorUI();
-    rebuildPreview();
+    installArtworkSource(image, 'image');
     URL.revokeObjectURL(image.src);
   };
   image.onerror = () => showError(new Error('The browser could not decode that image.'));
   image.src = URL.createObjectURL(file);
+});
+ui.openTextDialog.addEventListener('click', openTextEditor);
+ui.closeTextDialog.addEventListener('click', closeTextEditor);
+ui.cancelText.addEventListener('click', closeTextEditor);
+ui.createText.addEventListener('click', createTextArtwork);
+for (const control of [ui.textContent, ui.textFont, ui.textAlign, ui.textBold, ui.textItalic]) {
+  control.addEventListener('input', updateTextPreview);
+}
+ui.textDialog.addEventListener('click', event => {
+  if (event.target === ui.textDialog) closeTextEditor();
 });
 ui.renderMode.addEventListener('change', () => { updateRenderModeUI(); rebuildPreview(); });
 ui.threshold.addEventListener('input', () => { updateRenderModeUI(); rebuildPreview(); });

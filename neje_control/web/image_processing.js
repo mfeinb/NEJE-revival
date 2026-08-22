@@ -26,6 +26,26 @@
     };
   }
 
+  function textBlockGeometry(lineWidths, fontSize, lineHeight = 1.22, padding = 32, alignment = 'center') {
+    const widths = Array.from(lineWidths || [], value => Math.max(0, Number(value) || 0));
+    if (!widths.length) widths.push(0);
+    const size = Math.max(1, Number(fontSize) || 1);
+    const inset = Math.max(0, Number(padding) || 0);
+    const advance = Math.max(size, size * Math.max(1, Number(lineHeight) || 1));
+    const contentWidth = Math.max(1, ...widths);
+    const width = Math.max(1, Math.ceil(contentWidth + inset * 2));
+    const height = Math.max(1, Math.ceil(inset * 2 + size + advance * (widths.length - 1)));
+    const textAlign = ['left', 'right'].includes(alignment) ? alignment : 'center';
+    const x = textAlign === 'left' ? inset : (textAlign === 'right' ? width - inset : width / 2);
+    return {
+      width,
+      height,
+      advance,
+      textAlign,
+      positions: widths.map((lineWidth, index) => ({ x, y: inset + index * advance, width: lineWidth })),
+    };
+  }
+
   function adjustedLuma(image, width, height, options = {}) {
     const count = width * height;
     const tones = new Float32Array(count);
@@ -134,5 +154,5 @@
       : diffuse(tones, width, height, options.dither || 'floyd-steinberg');
   }
 
-  return { adjustedLuma, buildBurnMask, transformGeometry };
+  return { adjustedLuma, buildBurnMask, textBlockGeometry, transformGeometry };
 });

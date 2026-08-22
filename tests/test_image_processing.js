@@ -1,7 +1,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
-const { adjustedLuma, buildBurnMask, transformGeometry } = require('../neje_control/web/image_processing.js');
+const { adjustedLuma, buildBurnMask, textBlockGeometry, transformGeometry } = require('../neje_control/web/image_processing.js');
 
 function image(...pixels) {
   return { data: new Uint8ClampedArray(pixels.flat()) };
@@ -39,5 +39,14 @@ assert.deepEqual(
   transformGeometry(100, 100, { left: 80, right: 80, top: 98, bottom: 98 }, 0),
   { sx: 80, sy: 98, cropWidth: 1, cropHeight: 1, rotation: 0, width: 1, height: 1 },
 );
+
+assert.deepEqual(textBlockGeometry([120, 60], 40, 1.25, 10, 'center'), {
+  width: 140,
+  height: 110,
+  advance: 50,
+  textAlign: 'center',
+  positions: [{ x: 70, y: 10, width: 120 }, { x: 70, y: 60, width: 60 }],
+});
+assert.equal(textBlockGeometry([100], 30, 1.2, 8, 'right').positions[0].x, 108);
 
 console.log('image-processing tests passed');
